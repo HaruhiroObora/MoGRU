@@ -18,23 +18,23 @@
 
 ### 🐧 Linux (Fcitx5)
 ```bash
-git clone https://github.com/<your-username>/mozc.git
-cd mozc
+git clone https://github.com/HaruhiroObora/mozc-gru.git
+cd mozc-gru
 ./install.sh
 # または: ./scripts/install_linux.sh
 ```
 
 ### 🍎 macOS
 ```bash
-git clone https://github.com/<your-username>/mozc.git
-cd mozc
+git clone https://github.com/HaruhiroObora/mozc-gru.git
+cd mozc-gru
 ./scripts/install_macos.sh
 ```
 
 ### 🪟 Windows (PowerShell)
 ```powershell
-git clone https://github.com/<your-username>/mozc.git
-cd mozc
+git clone https://github.com/HaruhiroObora/mozc-gru.git
+cd mozc-gru
 Set-ExecutionPolicy Bypass -Scope Process -Force
 .\scripts\install_windows.ps1
 ```
