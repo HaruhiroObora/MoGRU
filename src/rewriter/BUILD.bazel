@@ -1757,8 +1757,8 @@ mozc_cc_library(
         "//base:vlog",
         "//converter:attribute",
         "//converter:segments",
+        "//gru_scorer",
         "//gru_scorer:charindex",
-        "//gru_scorer:gru_scorer",
         "//request:conversion_request",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/flags:flag",
@@ -1785,5 +1785,3 @@ mozc_cc_test(
         "@com_google_absl//absl/strings",
     ],
 )
-
-

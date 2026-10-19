@@ -30,7 +30,7 @@ jobs:
       - name: Setup
         run: |
           sudo apt-get update
-          sudo apt-get install -y libibus-1.0-dev qt6-base-dev
+          sudo apt-get install -y libibus-1.0-dev qt6-base-dev fcitx5 libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev fcitx5-modules-dev
           #
           # Unset the Android NDK setting to skip the unnecessary configuration.
           echo "ANDROID_NDK_HOME=" >> $GITHUB_ENV
@@ -39,6 +39,7 @@ jobs:
         working-directory: ./src
         run: |
           bazelisk build package --config release_build
+          bazelisk build -c opt //unix/fcitx5:fcitx5-mozc-gru.so --//unix/fcitx5:use_server=False
 
       - name: Upload Artifacts
         if: github.event_name == 'push'
@@ -46,6 +47,14 @@ jobs:
         with:
           name: mozc.zip
           path: src/bazel-bin/unix/mozc.zip
+          if-no-files-found: warn
+
+      - name: Upload fcitx5-mozc-gru Artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: fcitx5-mozc-gru.so
+          path: src/bazel-bin/unix/fcitx5/fcitx5-mozc-gru.so
           if-no-files-found: warn
 
   test:
@@ -63,7 +72,7 @@ jobs:
       - name: Setup
         run: |
           sudo apt-get update
-          sudo apt-get install -y libibus-1.0-dev qt6-base-dev
+          sudo apt-get install -y libibus-1.0-dev qt6-base-dev fcitx5 libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev fcitx5-modules-dev
           #
           # Unset the Android NDK setting to skip the unnecessary configuration.
           echo "ANDROID_NDK_HOME=" >> $GITHUB_ENV

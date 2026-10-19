@@ -47,4 +47,3 @@ mozc_cc_test(
         ":gru_scorer",
     ],
 )
-
