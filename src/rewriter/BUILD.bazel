@@ -1535,6 +1535,7 @@ mozc_cc_library(
         ":environmental_filter_rewriter",
         ":focus_candidate_rewriter",
         ":fortune_rewriter",
+        ":gru_rewriter",
         ":ivs_variants_rewriter",
         ":language_aware_rewriter",
         ":merger_rewriter",
@@ -1744,3 +1745,45 @@ mozc_cc_test(
         "//testing:gunit_main",
     ],
 )
+
+mozc_cc_library(
+    name = "gru_rewriter",
+    srcs = ["gru_rewriter.cc"],
+    hdrs = ["gru_rewriter.h"],
+    deps = [
+        ":rewriter_interface",
+        "//base:file_util",
+        "//base:system_util",
+        "//base:vlog",
+        "//converter:attribute",
+        "//converter:segments",
+        "//gru_scorer:charindex",
+        "//gru_scorer:gru_scorer",
+        "//request:conversion_request",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/synchronization",
+    ],
+    alwayslink = 1,
+)
+
+mozc_cc_test(
+    name = "gru_rewriter_test",
+    size = "small",
+    srcs = ["gru_rewriter_test.cc"],
+    deps = [
+        ":gru_rewriter",
+        "//converter:attribute",
+        "//converter:segments",
+        "//request:conversion_request",
+        "//testing:gunit_main",
+        "//testing:mozctest",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+

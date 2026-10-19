@@ -1,0 +1,50 @@
+# Copyright 2010-2021, Google Inc.
+# All rights reserved.
+
+load(
+    "//:build_defs.bzl",
+    "mozc_cc_library",
+    "mozc_cc_test",
+)
+
+package(default_visibility = ["//visibility:public"])
+
+mozc_cc_library(
+    name = "charindex",
+    srcs = ["charindex.cc"],
+    hdrs = ["charindex.hh"],
+)
+
+mozc_cc_library(
+    name = "gru_scorer",
+    srcs = [
+        "gru_model.cc",
+    ],
+    hdrs = [
+        "gru_model.hh",
+        "math_ops.hh",
+    ],
+    copts = [
+        "-O3",
+        "-mavx2",
+        "-mfma",
+    ],
+    deps = [
+        ":charindex",
+    ],
+)
+
+mozc_cc_test(
+    name = "gru_scorer_test",
+    size = "small",
+    srcs = ["gru_scorer_test.cc"],
+    data = [
+        "chardata.bin",
+        "dummy_model.bin",
+    ],
+    deps = [
+        ":charindex",
+        ":gru_scorer",
+    ],
+)
+

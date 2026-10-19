@@ -49,6 +49,7 @@
 #include "rewriter/english_variants_rewriter.h"
 #include "rewriter/environmental_filter_rewriter.h"
 #include "rewriter/focus_candidate_rewriter.h"
+#include "rewriter/gru_rewriter.h"
 #include "rewriter/ivs_variants_rewriter.h"
 #include "rewriter/language_aware_rewriter.h"
 #include "rewriter/number_rewriter.h"
@@ -164,6 +165,7 @@ Rewriter::Rewriter(const engine::Modules& modules) {
   AddRewriter(std::make_unique<ZipcodeRewriter>(pos_matcher));
   AddRewriter(std::make_unique<DiceRewriter>());
   AddRewriter(std::make_unique<SmallLetterRewriter>());
+  AddRewriter(std::make_unique<GruRewriter>());
 
   if (absl::GetFlag(FLAGS_use_history_rewriter)) {
     AddRewriter(std::make_unique<UserBoundaryHistoryRewriter>());

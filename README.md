@@ -1,14 +1,45 @@
-[Mozc - a Japanese Input Method Editor designed for multi-platform](https://github.com/google/mozc)
-===================================
+[Mozc GRU - Neural Language Model Integrated Mozc](https://github.com/google/mozc)
+========================================================================
 
-Copyright 2010-2026 Google LLC
+本リポジトリは、オープンソースかな漢字変換エンジン **Mozc** に、**文字単位 GRU ニューラル言語モデル（GRU Scorer）** を統合した拡張版です。
 
-Mozc is a Japanese Input Method Editor (IME) designed for multi-platform such as
-Android OS, Apple macOS, Chromium OS, GNU/Linux and Microsoft Windows.  This
-OpenSource project originates from
-[Google Japanese Input](http://www.google.com/intl/ja/ime/).
+### 主な特徴
+- **大域的ビームサーチ ($B=8$)**: 複数文節を跨いだ文脈をGRU言語モデルで評価し、文脈に応じた適切な同音異義語を自動リランキング。
+- **独立動作（共存対応）**: システム標準の `mozc` と競合せず、Fcitx5 上で `Mozc (GRU)` として独立して登録・利用可能。
+- **GUI設定対応**: Fcitx5 設定画面からモデルパスや文脈重み係数 $\alpha$（デフォルト 800）をリアルタイムに調整可能。
+- **マルチプラットフォーム**: Linux (Fcitx5), macOS, Windows をサポート。
 
-Mozc is not an officially supported Google product.
+---
+
+## クイックスタート（各OSでのビルド & インストール）
+
+リポジトリをクローンした後、お使いのOSに応じたスクリプトを実行するだけでビルド・インストールが完了します。
+モデル重みファイル（`grumodel.bin`, `chardata.bin`）も自動配置されます。
+
+### 🐧 Linux (Fcitx5)
+```bash
+git clone https://github.com/<your-username>/mozc.git
+cd mozc
+./install.sh
+# または: ./scripts/install_linux.sh
+```
+
+### 🍎 macOS
+```bash
+git clone https://github.com/<your-username>/mozc.git
+cd mozc
+./scripts/install_macos.sh
+```
+
+### 🪟 Windows (PowerShell)
+```powershell
+git clone https://github.com/<your-username>/mozc.git
+cd mozc
+Set-ExecutionPolicy Bypass -Scope Process -Force
+.\scripts\install_windows.ps1
+```
+
+---
 
 Build Status
 ------------
