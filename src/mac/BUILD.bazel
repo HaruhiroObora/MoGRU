@@ -120,6 +120,11 @@ mozc_macos_application(
     deps = ["mozc_macos_main_lib"],
 )
 
+alias(
+    name = "Mozc",
+    actual = ":mozc_macos",
+)
+
 mozc_objc_library(
     name = "common",
     hdrs = ["common.h"],

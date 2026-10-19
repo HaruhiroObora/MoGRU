@@ -30,6 +30,9 @@ git clone https://github.com/HaruhiroObora/mozc-gru.git
 cd mozc-gru
 ./scripts/install_macos.sh
 ```
+> [!TIP]
+> GitHub Actions の各実行画面（Artifacts）からビルド済みの `Mozc_arm64.pkg` / `Mozc_intel64.pkg` をダウンロードして直接実行・インストールすることも可能です。
+
 
 ### 🪟 Windows (PowerShell)
 ```powershell
@@ -44,9 +47,9 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 Build Status
 ------------
 
-| Linux | Windows | macOS | Android lib |
-|:-----:|:-------:|:-----:|:-----------:|
-| [![Linux](https://github.com/google/mozc/actions/workflows/linux.yaml/badge.svg)](https://github.com/google/mozc/actions/workflows/linux.yaml) | [![Windows](https://github.com/google/mozc/actions/workflows/windows.yaml/badge.svg)](https://github.com/google/mozc/actions/workflows/windows.yaml) | [![macOS](https://github.com/google/mozc/actions/workflows/macos.yaml/badge.svg)](https://github.com/google/mozc/actions/workflows/macos.yaml) | [![Android lib](https://github.com/google/mozc/actions/workflows/android.yaml/badge.svg)](https://github.com/google/mozc/actions/workflows/android.yaml) |
+| Linux | Windows | macOS |
+|:-----:|:-------:|:-----:|
+| [![Linux](https://github.com/HaruhiroObora/mozc-gru/actions/workflows/linux.yaml/badge.svg)](https://github.com/HaruhiroObora/mozc-gru/actions/workflows/linux.yaml) | [![Windows](https://github.com/HaruhiroObora/mozc-gru/actions/workflows/windows.yaml/badge.svg)](https://github.com/HaruhiroObora/mozc-gru/actions/workflows/windows.yaml) | [![macOS](https://github.com/HaruhiroObora/mozc-gru/actions/workflows/macos.yaml/badge.svg)](https://github.com/HaruhiroObora/mozc-gru/actions/workflows/macos.yaml) |
 
 
 What's Mozc?
