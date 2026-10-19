@@ -352,22 +352,6 @@ bool UserHistoryPredictor::ClearAllHistory() {
   return true;
 }
 
-bool UserHistoryPredictor::ClearUnusedHistory() {
-  std::vector<uint64_t> keys;
-
-  storage_.ForEach([&](uint64_t fp, const Entry& entry) {
-    if (entry.suggestion_freq() == 0) {
-      keys.push_back(fp);
-    }
-    return true;
-  });
-
-  storage_.Erase(keys);
-  storage_.AsyncSave();
-
-  return true;
-}
-
 // Erases all the next_entries whose entry_fp field equals |fp|.
 void UserHistoryPredictor::EraseNextEntries(uint64_t fp, Entry& entry) {
   auto& next_fps = *entry.mutable_next_entry_fps();
@@ -2143,30 +2127,6 @@ void UserHistoryPredictor::Finish(const ConversionRequest& request,
   if (!revert_entries.entries.empty()) {
     revert_entries.result = results.front();
     revert_cache_.Insert(revert_id, std::move(revert_entries));
-  }
-
-  // Update character form preferences based on committed results
-  // (b/554421471).
-  // TODO(taku): This is also a workaround for the fact that
-  // `VariantsRewriter::Finish` skips character form learning for any candidate
-  // with `Attribute::NO_VARIANTS_EXPANSION`. Because all user history
-  // candidates carry this attribute, selecting and committing a user history
-  // entry was previously ignored by VariantsRewriter, failing to update
-  // CharacterFormManager.
-  // In the future redesign, VariantsRewriter::Finish should unconditionally
-  // learn character forms from committed results regardless of
-  // NO_VARIANTS_EXPANSION, allowing this block to be removed.
-  auto* char_form_manager =
-      config::CharacterFormManager::GetCharacterFormManager();
-  for (const Result& result : results) {
-    if (result.attributes & converter::Attribute::NO_HISTORY_LEARNING) {
-      continue;
-    }
-    // Trailing ASCII whitespace might be present in result.value (e.g.
-    // alphanumeric keyboard layout commits). Strip it so script type and form
-    // can be properly recognized.
-    char_form_manager->GuessAndSetCharacterForm(
-        absl::StripTrailingAsciiWhitespace(result.value));
   }
 }
 

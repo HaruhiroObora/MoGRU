@@ -366,7 +366,19 @@ bool IosEngine::ClearUserHistory(commands::Command* command) {
   commands::Input* input = command->mutable_input();
   input->set_id(session_id_);
   input->set_type(commands::Input::CLEAR_USER_HISTORY);
-  return EvalCommandLockGuarded(command);
+  if (!EvalCommandLockGuarded(command)) {
+    return false;
+  }
+
+  command->Clear();
+  input = command->mutable_input();
+  input->set_id(session_id_);
+  input->set_type(commands::Input::CLEAR_USER_PREDICTION);
+  if (!EvalCommandLockGuarded(command)) {
+    return false;
+  }
+
+  return true;
 }
 
 bool IosEngine::Reload(commands::Command* command) {

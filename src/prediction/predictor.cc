@@ -46,6 +46,7 @@
 #include "converter/converter_interface.h"
 #include "converter/immutable_converter_interface.h"
 #include "engine/modules.h"
+#include "prediction/decoder_util.h"
 #include "prediction/dictionary_predictor.h"
 #include "prediction/predictor_interface.h"
 #include "prediction/realtime_decoder.h"
@@ -163,10 +164,6 @@ void Predictor::Revert(uint32_t revert_id) {
 
 bool Predictor::ClearAllHistory() {
   return user_history_predictor_->ClearAllHistory();
-}
-
-bool Predictor::ClearUnusedHistory() {
-  return user_history_predictor_->ClearUnusedHistory();
 }
 
 bool Predictor::ClearHistoryEntry(absl::string_view key,
@@ -315,6 +312,38 @@ void Predictor::DemoteWeakUserHistory(const ConversionRequest& request,
 std::vector<Result> Predictor::MixCandidates(
     const ConversionRequest& request, std::vector<Result> user_history_results,
     std::vector<Result> dictionary_results) const {
+  if (request.request()
+          .decoder_experiment_params()
+          .enable_weekday_zero_query_prediction() &&
+      request.IsZeroQuerySuggestion()) {
+    // Standalone parenthesized weekday zero-query candidates (e.g., " (水)")
+    // are dynamically computed from the calendar date by ZeroQueryDecoder and
+    // must never be replayed from persistent user history.
+    user_history_results.erase(
+        std::remove_if(user_history_results.begin(), user_history_results.end(),
+                       [](const Result& r) {
+                         return IsStandaloneParenthesizedWeekday(r.value);
+                       }),
+        user_history_results.end());
+
+    const absl::string_view last_history_value =
+        request.converter_history_value(1);
+    const absl::string_view full_history_value =
+        request.converter_history_value(-1);
+    const absl::string_view preceding_text = request.context().preceding_text();
+    if (EndsWithWeekdayExpression(last_history_value) ||
+        EndsWithWeekdayExpression(full_history_value) ||
+        (last_history_value.empty() &&
+         EndsWithWeekdayExpression(preceding_text))) {
+      dictionary_results.erase(
+          std::remove_if(dictionary_results.begin(), dictionary_results.end(),
+                         [](const Result& r) {
+                           return IsStandaloneParenthesizedWeekday(r.value);
+                         }),
+          dictionary_results.end());
+    }
+  }
+
   // Add NO_DELETABLE annotation when the top user history result is the same
   // as the top dictionary result.
   // when user_history_results.size() > 1, the decoder can still show the second

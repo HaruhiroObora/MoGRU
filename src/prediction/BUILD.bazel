@@ -50,6 +50,9 @@ proto_library(
 
 cc_proto_library(
     name = "user_history_predictor_cc_proto",
+    visibility = [
+        "//config:__pkg__",
+    ],
     deps = [":user_history_predictor_proto"],
 )
 
@@ -81,6 +84,7 @@ mozc_cc_library(
         "//base:hash",
         "//base:thread",
         "//base:util",
+        "//config:character_form_manager",
         "//storage:encrypted_string_storage",
         "//storage:lru_cache",
         "@com_google_absl//absl/algorithm:container",
@@ -106,8 +110,11 @@ mozc_cc_test(
     deps = [
         ":user_history_storage",
         "//base:file_util",
+        "//base:number_util",
         "//base:thread",
         "//base/file:temp_dir",
+        "//config:character_form_manager",
+        "//protocol:config_cc_proto",
         "//storage:encrypted_string_storage",
         "//testing:gunit_main",
         "//testing:mozctest",
@@ -446,6 +453,7 @@ mozc_cc_library(
         "//engine:__pkg__",
     ],
     deps = [
+        ":decoder_util",
         ":dictionary_predictor",
         ":predictor_interface",
         ":realtime_decoder",
@@ -551,11 +559,13 @@ mozc_cc_library(
         ":result",
         "//base:number_util",
         "//base:util",
+        "//base/strings:strip",
         "//converter:attribute",
         "//converter:node_list_builder",
         "//dictionary:dictionary_interface",
         "//dictionary:dictionary_token",
         "//request:conversion_request",
+        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
@@ -587,18 +597,20 @@ mozc_cc_library(
         ":decoder_util",
         ":result",
         ":zero_query_dict",
+        "//base:date_util",
         "//base:japanese_util",
         "//base:number_util",
         "//base:util",
+        "//converter:attribute",
         "//dictionary:dictionary_interface",
         "//dictionary:dictionary_token",
         "//engine:modules",
         "//protocol:commands_cc_proto",
         "//request:conversion_request",
         "//request:request_util",
-        "//transliteration",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
     ],
 )
@@ -610,7 +622,9 @@ mozc_cc_test(
         ":result",
         ":zero_query_decoder",
         ":zero_query_dict",
+        "//base:clock_mock",
         "//base/container:serialized_string_array",
+        "//converter:attribute",
         "//data_manager/testing:mock_data_manager",
         "//dictionary:pos_matcher",
         "//engine:modules",
@@ -620,6 +634,7 @@ mozc_cc_test(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/time",
     ],
 )
 

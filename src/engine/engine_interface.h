@@ -83,12 +83,7 @@ class EngineInterface {
   virtual bool ClearUserHistory() { return true; }
 
   // Clears user prediction data.
-  // TODO(b/567921560): Remove ClearUserPrediction and ClearUnusedUserPrediction
-  // once all callers are migrated to ClearUserHistory.
   virtual bool ClearUserPrediction() { return true; }
-
-  // Clears unused user prediction data.
-  virtual bool ClearUnusedUserPrediction() { return true; }
 
   // Adds key/value to user history data. `key` can be empty.
   virtual bool AddUserHistory(absl::string_view key, absl::string_view value) {

@@ -1222,62 +1222,6 @@ TEST_F(UserHistoryPredictorTest, DescriptionTest) {
   }
 }
 
-TEST_F(UserHistoryPredictorTest, UserHistoryPredictorUnusedHistoryTest) {
-  std::vector<Result> results;
-
-  constexpr absl::string_view kKey = "わたしのなまえはなかのです";
-  constexpr absl::string_view kValue = "私の名前は中野です";
-
-  {
-    UserHistoryPredictor* predictor = GetUserHistoryPredictor();
-    predictor->Wait();
-
-    SegmentsProxy segments_proxy;
-    const ConversionRequest convreq =
-        SetUpInputForSuggestion(kKey, &composer_, &segments_proxy);
-    segments_proxy.AddCandidate(0, kValue);
-
-    predictor->Finish(convreq, segments_proxy.MakeLearningResults(), kRevertId);
-
-    predictor->Sync();
-    predictor->Wait();
-  }
-
-  {
-    UserHistoryPredictor* predictor = GetUserHistoryPredictor();
-    UserHistoryPredictorTestPeer predictor_peer(*predictor);
-    predictor->Wait();
-    SegmentsProxy segments_proxy;
-
-    const ConversionRequest convreq =
-        SetUpInputForSuggestion("わたしの", &composer_, &segments_proxy);
-    results = predictor->Predict(convreq);
-    EXPECT_FALSE(results.empty());
-    EXPECT_EQ(results[0].value, "私の名前は中野です");
-
-    // Generates unused entry.
-    auto entry = predictor_peer.storage_().MutableLookup(kKey, kValue);
-    ASSERT_TRUE(entry);
-    // Implementing Revert at zero frequency is a valid and
-    // consistent way to implement redo.
-    entry->set_suggestion_freq(0);  // set unused.
-  }
-
-  {
-    UserHistoryPredictor* predictor = GetUserHistoryPredictor();
-    predictor->ClearUnusedHistory();
-    predictor->Wait();
-
-    SegmentsProxy segments_proxy;
-    const ConversionRequest convreq =
-        SetUpInputForSuggestion("わたしの", &composer_, &segments_proxy);
-
-    // No suggestion after clear unused history.
-    results = predictor->Predict(convreq);
-    EXPECT_TRUE(results.empty());
-  }
-}
-
 TEST_F(UserHistoryPredictorTest, UserHistoryPredictorRevertTest) {
   UserHistoryPredictor* predictor = GetUserHistoryPredictorWithClearedHistory();
   ScopedClockMock clock(absl::FromUnixSeconds(1));
@@ -6702,28 +6646,67 @@ TEST_F(UserHistoryPredictorTest, CharacterFormNormalization) {
             "すうじ", "０１２３"));
   }
 
-  // 4. Committing a half-width candidate updates CharacterFormManager
-  // preferences via GuessAndSetCharacterForm in Finish().
+  // 4. UserHistoryPredictor::Finish() does not modify CharacterFormManager
+  // preferences (character form learning is handled solely by
+  // VariantsRewriter::Finish()), preventing unselected n-best candidates in
+  // `results` from overwriting the user's selected character form.
   {
-    char_form_manager->SetCharacterForm("0", config::Config::LAST_FORM);
+    char_form_manager->SetCharacterForm("0", config::Config::FULL_WIDTH);
     SegmentsProxy segments_proxy;
     const ConversionRequest convreq =
         SetUpInputForConversion("べつのきー", &composer_, &segments_proxy);
+    // Simulate a 1-segment commit where index 0 is full-width "９９９" and
+    // index 1 (unselected n-best) is half-width "999".
+    segments_proxy.AddCandidate(0, "９９９");
     segments_proxy.AddCandidate(0, "999");
     predictor->Finish(convreq, segments_proxy.MakeLearningResults(), kRevertId);
 
-    // After committing half-width "999", LAST_FORM preference should be
-    // HALF_WIDTH.
     EXPECT_EQ(char_form_manager->GetConversionCharacterForm("0"),
-              config::Config::HALF_WIDTH);
+              config::Config::FULL_WIDTH);
+  }
 
-    // And suggestion for "すう" should now normalize to "0123".
+  // 5. User dictionary and NO_VARIANTS_EXPANSION results (including subsequent
+  // predictions from user history) should not overwrite CharacterFormManager
+  // preferences.
+  {
+    char_form_manager->SetCharacterForm("A", config::Config::FULL_WIDTH);
+    char_form_manager->SetCharacterForm("0", config::Config::FULL_WIDTH);
+
+    SegmentsProxy segments_proxy;
+    const ConversionRequest convreq =
+        SetUpInputForConversion("ぐーぐる", &composer_, &segments_proxy);
+    segments_proxy.AddCandidate(0, "Google");
+    segments_proxy.MutableCandidate(0, 0)->attributes =
+        converter::Attribute::REALTIME_CONVERSION |
+        converter::Attribute::USER_DICTIONARY;
+    predictor->Finish(convreq, segments_proxy.MakeLearningResults(), kRevertId);
+    EXPECT_EQ(char_form_manager->GetConversionCharacterForm("A"),
+              config::Config::FULL_WIDTH);
+
+    // Committing "Google" when predicted from user history (which carries
+    // USER_HISTORY_PREDICTION | NO_VARIANTS_EXPANSION without USER_DICTIONARY)
+    // must also preserve the FULL_WIDTH preference.
     segments_proxy.Clear();
-    const ConversionRequest convreq_pred =
-        SetUpInputForPrediction("すう", &composer_, &segments_proxy);
-    const std::vector<Result> results = predictor->Predict(convreq_pred);
-    ASSERT_FALSE(results.empty());
-    EXPECT_EQ(results[0].value, "0123");
+    const ConversionRequest pred_req =
+        SetUpInputForPrediction("ぐー", &composer_, &segments_proxy);
+    const std::vector<Result> history_results = predictor->Predict(pred_req);
+    ASSERT_FALSE(history_results.empty());
+    EXPECT_EQ(history_results[0].value, "Google");
+    predictor->Finish(pred_req, absl::MakeSpan(history_results).subspan(0, 1),
+                      kRevertId);
+    EXPECT_EQ(char_form_manager->GetConversionCharacterForm("A"),
+              config::Config::FULL_WIDTH);
+
+    segments_proxy.Clear();
+    const ConversionRequest date_req =
+        SetUpInputForConversion("きょう", &composer_, &segments_proxy);
+    segments_proxy.AddCandidate(0, "2026/10/04");
+    segments_proxy.MutableCandidate(0, 0)->attributes =
+        converter::Attribute::NO_VARIANTS_EXPANSION;
+    predictor->Finish(date_req, segments_proxy.MakeLearningResults(),
+                      kRevertId);
+    EXPECT_EQ(char_form_manager->GetConversionCharacterForm("0"),
+              config::Config::FULL_WIDTH);
   }
 
   // Restore CharacterFormManager default state.

@@ -30,6 +30,7 @@
 #include "engine/engine.h"
 
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include "absl/log/check.h"
@@ -109,6 +110,11 @@ absl::Status Engine::Init(std::unique_ptr<engine::Modules> modules) {
   }
 
   converter_ = std::move(converter);
+  if (pending_supplemental_model_request_.has_value()) {
+    converter_->modules().GetSupplementalModel().LoadAsync(
+        *pending_supplemental_model_request_);
+    pending_supplemental_model_request_.reset();
+  }
 
   return absl::OkStatus();
 }
@@ -122,20 +128,14 @@ bool Engine::Wait() { return converter_ && converter_->Wait(); }
 bool Engine::ReloadAndWait() { return Reload() && Wait(); }
 
 bool Engine::ClearUserHistory() {
-  if (!converter_) {
-    return false;
+  if (converter_) {
+    converter_->rewriter().Clear();
   }
-  converter_->rewriter().Clear();
-  return converter_->predictor().ClearAllHistory();
+  return true;
 }
 
-// TODO(b/567921560): Remove ClearUserPrediction and ClearUnusedUserPrediction
-// (and the corresponding CLEAR_USER_PREDICTION / CLEAR_UNUSED_USER_PREDICTION
-// commands) once all callers are migrated to ClearUserHistory.
-bool Engine::ClearUserPrediction() { return ClearUserHistory(); }
-
-bool Engine::ClearUnusedUserPrediction() {
-  return converter_ && converter_->predictor().ClearUnusedHistory();
+bool Engine::ClearUserPrediction() {
+  return converter_ && converter_->predictor().ClearAllHistory();
 }
 
 bool Engine::AddUserHistory(absl::string_view key, absl::string_view value) {
@@ -175,6 +175,8 @@ bool Engine::SendSupplementalModelReloadRequest(
     const EngineReloadRequest& request) {
   if (converter_) {
     converter_->modules().GetSupplementalModel().LoadAsync(request);
+  } else {
+    pending_supplemental_model_request_ = request;
   }
   return true;
 }

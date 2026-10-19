@@ -27,17 +27,22 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#import <Cocoa/Cocoa.h>
-#import <InstallerPlugins/InstallerPlugins.h>
+#include "base/strings/strip.h"
 
-@interface DevConfirmPane : InstallerPane {
-  IBOutlet NSTextField *_mainMessage;
-  IBOutlet NSTextField *_understandMessage;
-  IBOutlet NSTextField *_agreeMessage;
-  IBOutlet NSButton *_understandCheckBox;
-  IBOutlet NSButton *_agreeCheckBox;
-  BOOL _understandFlag;
-  BOOL _agreeFlag;
+#include "testing/gunit.h"
+
+namespace mozc::strings {
+namespace {
+
+TEST(StripTest, StripWhitespace) {
+  EXPECT_EQ(StripLeadingWhitespace(""), "");
+  EXPECT_EQ(StripTrailingWhitespace(""), "");
+  EXPECT_EQ(StripWhitespace(""), "");
+  EXPECT_EQ(StripLeadingWhitespace(" 　(水) "), "(水) ");
+  EXPECT_EQ(StripTrailingWhitespace(" (水) 　"), " (水)");
+  EXPECT_EQ(StripWhitespace(" 　(水) 　"), "(水)");
+  EXPECT_EQ(StripWhitespace(" 　"), "");
 }
-- (IBAction)checkBoxClicked:(id)sender;
-@end
+
+}  // namespace
+}  // namespace mozc::strings

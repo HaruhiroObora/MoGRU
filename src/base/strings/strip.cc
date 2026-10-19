@@ -27,19 +27,45 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#import <Cocoa/Cocoa.h>
-#import <InstallerPlugins/InstallerPlugins.h>
+#include "base/strings/strip.h"
 
-@interface ActivatePane : InstallerPane {
-  IBOutlet NSTextField *_mainMessage;
-  IBOutlet NSTextField *_upgradeMessage;
-  IBOutlet NSButtonCell *_activateCell;
-  IBOutlet NSButtonCell *_doNotActivateCell;
-  IBOutlet NSButton *_putUsageStatsDB;
-  IBOutlet NSTextField *_putUsageStatsDBMessage;
-  BOOL _alreadyActivated;
-  BOOL _isUpgrade;
-  BOOL _hasUsageStatsDB;
+#include "absl/strings/string_view.h"
+
+namespace mozc::strings {
+namespace {
+
+constexpr absl::string_view kFullwidthWhitespace = "　";
+
+}  // namespace
+
+absl::string_view StripLeadingWhitespace(absl::string_view text) {
+  while (!text.empty()) {
+    if (text.starts_with(' ')) {
+      text.remove_prefix(1);
+    } else if (text.starts_with(kFullwidthWhitespace)) {
+      text.remove_prefix(kFullwidthWhitespace.size());
+    } else {
+      break;
+    }
+  }
+  return text;
 }
 
-@end
+absl::string_view StripTrailingWhitespace(absl::string_view text) {
+  while (!text.empty()) {
+    if (text.ends_with(' ')) {
+      text.remove_suffix(1);
+    } else if (text.ends_with(kFullwidthWhitespace)) {
+      text.remove_suffix(kFullwidthWhitespace.size());
+    } else {
+      break;
+    }
+  }
+  return text;
+}
+
+absl::string_view StripWhitespace(absl::string_view text) {
+  return StripTrailingWhitespace(StripLeadingWhitespace(text));
+}
+
+}  // namespace mozc::strings
