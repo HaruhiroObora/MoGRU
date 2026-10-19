@@ -24,11 +24,6 @@ mozc_cc_library(
         "gru_model.hh",
         "math_ops.hh",
     ],
-    copts = [
-        "-O3",
-        "-mavx2",
-        "-mfma",
-    ],
     deps = [
         ":charindex",
     ],
