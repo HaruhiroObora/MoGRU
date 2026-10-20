@@ -878,6 +878,11 @@ bool UserSegmentHistoryRewriter::ClearHistoryEntry(const Segments& segments,
 
 bool UserSegmentHistoryRewriter::IsPunctuation(
     const Segment& seg, const converter::Candidate& candidate) const {
+  if (IsPunctuationInternal(seg.key()) ||
+      (!seg.key().empty() &&
+       Util::IsScriptType(seg.key(), Util::UNKNOWN_SCRIPT))) {
+    return true;
+  }
   return (pos_matcher_->IsJapanesePunctuations(candidate.lid) &&
           candidate.lid == candidate.rid && IsPunctuationInternal(seg.key()) &&
           IsPunctuationInternal(candidate.value));

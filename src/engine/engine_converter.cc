@@ -524,7 +524,7 @@ bool EngineConverter::Suggest(const composer::Composer& composer,
 
     const std::string pred_key = composer.GetQueryForPrediction();
     if (pred_key.empty() ||
-        Util::GetScriptType(pred_key) == Util::ALPHABET) {
+        !Util::ContainsScriptType(pred_key, Util::HIRAGANA)) {
       return false;
     }
 

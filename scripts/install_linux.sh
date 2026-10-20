@@ -148,7 +148,7 @@ fi
 # 7. Restart Fcitx5
 echo "=== Restarting Fcitx5 ==="
 if command -v fcitx5 &>/dev/null; then
-  FCITX_ADDON_DIRS="$HOME/.local/lib/fcitx5:/usr/lib/x86_64-linux-gnu/fcitx5" fcitx5 -r -d || true
+  FCITX_ADDON_DIRS="$HOME/.local/lib/fcitx5:/usr/lib/x86_64-linux-gnu/fcitx5" fcitx5 -r -d >/dev/null 2>&1 </dev/null || true
   echo "[+] Fcitx5 restarted successfully."
 else
   echo "[!] fcitx5 command not found in PATH. Please restart Fcitx5 manually."

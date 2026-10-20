@@ -56,8 +56,13 @@ bool ContainsEmoji(const charindex::CharIndex& indexer, const std::string& str) 
 
 bool IsCandidateEmoji(const charindex::CharIndex& indexer,
                       const Segment::Candidate& cand) {
+  if (cand.category == converter::Candidate::SYMBOL) return true;
   if (absl::StrContains(cand.description, "絵文字")) return true;
   return ContainsEmoji(indexer, cand.value);
+}
+
+bool IsSymbolSegment(const Segment& seg) {
+  return !Util::ContainsScriptType(seg.key(), Util::HIRAGANA);
 }
 
 std::string ResolveFilePath(const std::string& user_specified,
@@ -345,6 +350,9 @@ bool GruRewriter::Rewrite(const ConversionRequest& request,
   // Single-segment case
   if (num_segments == 1) {
     Segment* seg = segments->mutable_conversion_segment(0);
+    if (IsSymbolSegment(*seg)) {
+      return false;
+    }
     if (seg->candidates_size() <= 1) {
       if (seg->candidates_size() == 1 && show_score) {
         auto* cand = seg->mutable_candidate(0);
@@ -407,13 +415,17 @@ bool GruRewriter::Rewrite(const ConversionRequest& request,
   {
     const Segment& seg0 = segments->conversion_segment(0);
     const int32_t top_cost = seg0.candidate(0).cost;
-    const size_t num_eval = std::min(seg0.candidates_size(), kMaxCandidatesPerSegmentForBeam);
+    const size_t num_eval =
+        IsSymbolSegment(seg0)
+            ? std::min<size_t>(seg0.candidates_size(), 1)
+            : std::min(seg0.candidates_size(), kMaxCandidatesPerSegmentForBeam);
 
     for (size_t j = 0; j < num_eval; ++j) {
       const auto& cand = seg0.candidate(j);
       if (cand.cost > top_cost + kMaxCostDiff) continue;
 
-      const bool is_emoji = IsCandidateEmoji(*indexer_, cand);
+      const bool is_emoji =
+          !IsSymbolSegment(seg0) && IsCandidateEmoji(*indexer_, cand);
       const float score = model_->ScoreStringWithContext(
           *indexer_, cand.value, init_context, true);
       double eval = static_cast<double>(cand.cost) - (alpha * score);
@@ -433,7 +445,11 @@ bool GruRewriter::Rewrite(const ConversionRequest& request,
   for (size_t seg_idx = 1; seg_idx < num_segments; ++seg_idx) {
     const Segment& seg = segments->conversion_segment(seg_idx);
     const int32_t top_cost = seg.candidate(0).cost;
-    const size_t num_eval = std::min(seg.candidates_size(), kMaxCandidatesPerSegmentForBeam);
+    const bool is_sym_seg = IsSymbolSegment(seg);
+    const size_t num_eval =
+        is_sym_seg
+            ? std::min<size_t>(seg.candidates_size(), 1)
+            : std::min(seg.candidates_size(), kMaxCandidatesPerSegmentForBeam);
 
     std::vector<BeamPath> next_beam;
     next_beam.reserve(beam.size() * num_eval);
@@ -445,7 +461,8 @@ bool GruRewriter::Rewrite(const ConversionRequest& request,
         const auto& cand = seg.candidate(j);
         if (cand.cost > top_cost + kMaxCostDiff) continue;
 
-        const bool is_emoji = path.has_emoji || IsCandidateEmoji(*indexer_, cand);
+        const bool is_emoji =
+            path.has_emoji || (!is_sym_seg && IsCandidateEmoji(*indexer_, cand));
         const float cand_score = model_->ScoreStringWithContext(
             *indexer_, cand.value, path_ctx, true);
         const int32_t new_viterbi = path.total_viterbi_cost + cand.cost;
@@ -478,6 +495,9 @@ bool GruRewriter::Rewrite(const ConversionRequest& request,
   // 3. Promote best candidate to index 0 and sort secondary candidates for each segment
   for (size_t seg_idx = 0; seg_idx < num_segments; ++seg_idx) {
     Segment* seg = segments->mutable_conversion_segment(seg_idx);
+    if (IsSymbolSegment(*seg)) {
+      continue;
+    }
     const size_t best_cand_idx = best_path.indices[seg_idx];
     const int32_t top_cost = seg->candidate(0).cost;
     const size_t num_eval = std::min(seg->candidates_size(), kMaxCandidateEvaluation);
@@ -580,6 +600,9 @@ bool GruRewriter::Focus(Segments* segments, size_t segment_index,
   if (remaining_segments == 1) {
     // Single remaining segment: evaluate and sort candidates directly using prefix_ctx
     Segment* next_seg = segments->mutable_conversion_segment(conv_seg_index + 1);
+    if (IsSymbolSegment(*next_seg)) {
+      return false;
+    }
     const int32_t top_cost = next_seg->candidate(0).cost;
     const size_t num_eval = std::min(next_seg->candidates_size(), kMaxCandidateEvaluation);
 
@@ -629,13 +652,18 @@ bool GruRewriter::Focus(Segments* segments, size_t segment_index,
     {
       const Segment& seg = segments->conversion_segment(first_sub_idx);
       const int32_t top_cost = seg.candidate(0).cost;
-      const size_t num_eval = std::min(seg.candidates_size(), kMaxCandidatesPerSegmentForBeam);
+      const bool is_sym_seg = IsSymbolSegment(seg);
+      const size_t num_eval =
+          is_sym_seg
+              ? std::min<size_t>(seg.candidates_size(), 1)
+              : std::min(seg.candidates_size(), kMaxCandidatesPerSegmentForBeam);
 
       for (size_t j = 0; j < num_eval; ++j) {
         const auto& cand = seg.candidate(j);
         if (cand.cost > top_cost + kMaxCostDiff) continue;
 
-        const bool is_emoji = IsCandidateEmoji(*indexer_, cand);
+        const bool is_emoji =
+            !is_sym_seg && IsCandidateEmoji(*indexer_, cand);
         const float score = model_->ScoreStringWithContext(
             *indexer_, cand.value, prefix_ctx, true);
         double eval = static_cast<double>(cand.cost) - (alpha * score);
@@ -653,7 +681,11 @@ bool GruRewriter::Focus(Segments* segments, size_t segment_index,
       for (size_t sub_idx = first_sub_idx + 1; sub_idx < num_conv_segments; ++sub_idx) {
         const Segment& seg = segments->conversion_segment(sub_idx);
         const int32_t top_cost = seg.candidate(0).cost;
-        const size_t num_eval = std::min(seg.candidates_size(), kMaxCandidatesPerSegmentForBeam);
+        const bool is_sym_seg = IsSymbolSegment(seg);
+        const size_t num_eval =
+            is_sym_seg
+                ? std::min<size_t>(seg.candidates_size(), 1)
+                : std::min(seg.candidates_size(), kMaxCandidatesPerSegmentForBeam);
 
         std::vector<BeamPath> next_beam;
         next_beam.reserve(beam.size() * num_eval);
@@ -665,7 +697,8 @@ bool GruRewriter::Focus(Segments* segments, size_t segment_index,
             const auto& cand = seg.candidate(j);
             if (cand.cost > top_cost + kMaxCostDiff) continue;
 
-            const bool is_emoji = path.has_emoji || IsCandidateEmoji(*indexer_, cand);
+            const bool is_emoji =
+                path.has_emoji || (!is_sym_seg && IsCandidateEmoji(*indexer_, cand));
             const float cand_score = model_->ScoreStringWithContext(
                 *indexer_, cand.value, path_ctx, true);
             const int32_t new_viterbi = path.total_viterbi_cost + cand.cost;
@@ -697,6 +730,9 @@ bool GruRewriter::Focus(Segments* segments, size_t segment_index,
         const size_t rel_idx = sub_idx - first_sub_idx;
         const size_t best_cand_idx = best_path.indices[rel_idx];
         Segment* seg = segments->mutable_conversion_segment(sub_idx);
+        if (IsSymbolSegment(*seg)) {
+          continue;
+        }
         const int32_t top_cost = seg->candidate(0).cost;
         const size_t num_eval = std::min(seg->candidates_size(), kMaxCandidateEvaluation);
 

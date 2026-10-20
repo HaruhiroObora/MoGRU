@@ -318,19 +318,19 @@ TEST_F(GruRewriterTest, ThreeSegmentFocusControl) {
   Segments segments;
 
   Segment* seg0 = segments.add_segment();
-  seg0->set_key("第1");
-  AddCandidate("第1", "A0", 1000, seg0);
-  AddCandidate("第1", "A1", 1050, seg0);
+  seg0->set_key("だいいち");
+  AddCandidate("だいいち", "A0", 1000, seg0);
+  AddCandidate("だいいち", "A1", 1050, seg0);
 
   Segment* seg1 = segments.add_segment();
-  seg1->set_key("第2");
-  AddCandidate("第2", "B0", 1000, seg1);
-  AddCandidate("第2", "B1", 1050, seg1);
+  seg1->set_key("だいに");
+  AddCandidate("だいに", "B0", 1000, seg1);
+  AddCandidate("だいに", "B1", 1050, seg1);
 
   Segment* seg2 = segments.add_segment();
-  seg2->set_key("第3");
-  AddCandidate("第3", "C0", 1000, seg2);
-  AddCandidate("第3", "C1", 1050, seg2);
+  seg2->set_key("だいさん");
+  AddCandidate("だいさん", "C0", 1000, seg2);
+  AddCandidate("だいさん", "C1", 1050, seg2);
 
   rewriter_->Rewrite(request, &segments);
 
@@ -356,6 +356,32 @@ TEST_F(GruRewriterTest, ThreeSegmentFocusControl) {
   const bool f2 = rewriter_->Focus(&segments, 2, 0);
   // Last segment focus should return false (no subsequent segments to rerank)
   EXPECT_FALSE(f2);
+}
+
+TEST_F(GruRewriterTest, SkipSymbolAndPunctuationSegments) {
+  rewriter_->Reload();
+
+  ConversionRequest request;
+  Segments segments;
+
+  // Segment 0: normal hiragana segment
+  Segment* seg0 = segments.add_segment();
+  seg0->set_key("きょうは");
+  AddCandidate("きょうは", "今日は", 1000, seg0);
+  AddCandidate("きょうは", "教派", 2000, seg0);
+
+  // Segment 1: punctuation segment (e.g. "." when punctuation style is "，．")
+  // SymbolRewriter inserts "！" with the same cost (0) as "．".
+  Segment* seg1 = segments.add_segment();
+  seg1->set_key(".");
+  AddCandidate(".", "．", 0, seg1);
+  AddCandidate(".", "！", 0, seg1);
+  AddCandidate(".", "？", 0, seg1);
+
+  rewriter_->Rewrite(request, &segments);
+
+  // Punctuation segment must keep its first candidate "．" and not be replaced by "！"
+  EXPECT_EQ(segments.conversion_segment(1).candidate(0).value, "．");
 }
 
 }  // namespace
