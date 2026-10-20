@@ -2059,6 +2059,9 @@ bool Session::DisplayAsHiragana(commands::Command* command) {
   if (context_->state() == ImeContext::CONVERSION) {
     return ConvertToHiragana(command);
   } else {  // context_->state() == ImeContext::COMPOSITION
+    if (context_->converter().IsActive()) {
+      context_->mutable_converter()->Cancel();
+    }
     context_->mutable_composer()->SetOutputMode(transliteration::HIRAGANA);
     OutputComposition(command);
     return true;
@@ -2070,6 +2073,9 @@ bool Session::DisplayAsFullKatakana(commands::Command* command) {
   if (context_->state() == ImeContext::CONVERSION) {
     return ConvertToFullKatakana(command);
   } else {  // context_->state() == ImeContext::COMPOSITION
+    if (context_->converter().IsActive()) {
+      context_->mutable_converter()->Cancel();
+    }
     context_->mutable_composer()->SetOutputMode(transliteration::FULL_KATAKANA);
     OutputComposition(command);
     return true;
@@ -2081,6 +2087,9 @@ bool Session::DisplayAsHalfKatakana(commands::Command* command) {
   if (context_->state() == ImeContext::CONVERSION) {
     return ConvertToHalfKatakana(command);
   } else {  // context_->state() == ImeContext::COMPOSITION
+    if (context_->converter().IsActive()) {
+      context_->mutable_converter()->Cancel();
+    }
     context_->mutable_composer()->SetOutputMode(transliteration::HALF_KATAKANA);
     OutputComposition(command);
     return true;
@@ -2092,6 +2101,9 @@ bool Session::TranslateFullASCII(commands::Command* command) {
   if (context_->state() == ImeContext::CONVERSION) {
     return ConvertToFullASCII(command);
   } else {  // context_->state() == ImeContext::COMPOSITION
+    if (context_->converter().IsActive()) {
+      context_->mutable_converter()->Cancel();
+    }
     context_->mutable_composer()->SetOutputMode(
         transliteration::T13n::ToggleFullAsciiTypes(
             context_->composer().GetOutputMode()));
@@ -2105,6 +2117,9 @@ bool Session::TranslateHalfASCII(commands::Command* command) {
   if (context_->state() == ImeContext::CONVERSION) {
     return ConvertToHalfASCII(command);
   } else {  // context_->state() == ImeContext::COMPOSITION
+    if (context_->converter().IsActive()) {
+      context_->mutable_converter()->Cancel();
+    }
     context_->mutable_composer()->SetOutputMode(
         transliteration::T13n::ToggleHalfAsciiTypes(
             context_->composer().GetOutputMode()));
@@ -2242,6 +2257,9 @@ bool Session::TranslateHalfWidth(commands::Command* command) {
     } else {
       // transliteration::HALF_ASCII_something
       return TranslateHalfASCII(command);
+    }
+    if (context_->converter().IsActive()) {
+      context_->mutable_converter()->Cancel();
     }
     OutputComposition(command);
     return true;

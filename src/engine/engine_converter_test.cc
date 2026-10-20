@@ -45,6 +45,8 @@
 #include <string>
 #include <vector>
 
+#include "absl/flags/declare.h"
+#include "absl/flags/flag.h"
 #include "absl/log/check.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
@@ -70,6 +72,8 @@
 #include "testing/mozctest.h"
 #include "testing/testing_util.h"
 #include "transliteration/transliteration.h"
+
+ABSL_DECLARE_FLAG(bool, enable_live_conversion);
 
 namespace mozc {
 namespace engine {
@@ -4966,6 +4970,136 @@ TEST_F(EngineConverterTest, CommitHeadToFocusedSegmentsMultiSegmentCandidate) {
   converter.FillOutput(*composer_, &output);
   EXPECT_EQ(output.result().value(), "ここで履物を");
   EXPECT_EQ(output.result().key(), "ここではきものを");
+}
+
+TEST_F(EngineConverterTest, LiveConversionInlineAndSpaceShowsCandidates) {
+  absl::SetFlag(&FLAGS_enable_live_conversion, true);
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+
+  // 1. Single unconfirmed consonant "k" -> no live conversion yet.
+  composer_->InsertCharacter("k");
+  EXPECT_FALSE(converter.Suggest(*composer_));
+
+  // 2. Complete kana "kyou" ("きょう") + trailing consonant "k" ("きょうｋ")
+  composer_->InsertCharacter("youk");
+
+  Segments live_segments;
+  {
+    Segment* seg = live_segments.add_segment();
+    seg->set_key("きょう");
+    converter::Candidate* cand0 = seg->add_candidate();
+    cand0->value = "今日";
+    cand0->key = "きょう";
+    cand0->content_key = "きょう";
+    cand0->content_value = "今日";
+    converter::Candidate* cand1 = seg->add_candidate();
+    cand1->value = "京";
+    cand1->key = "きょう";
+    cand1->content_key = "きょう";
+    cand1->content_value = "京";
+  }
+
+  EXPECT_CALL(*mock_converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(live_segments), Return(true)));
+
+  EXPECT_TRUE(converter.Suggest(*composer_));
+  EXPECT_TRUE(converter.IsActive());
+  EXPECT_FALSE(IsCandidateListVisible(converter));
+
+  {
+    commands::Output output;
+    converter.FillOutput(*composer_, &output);
+    EXPECT_TRUE(output.has_preedit());
+    EXPECT_FALSE(output.has_candidate_window());
+    ASSERT_EQ(output.preedit().segment_size(), 2);
+    EXPECT_EQ(output.preedit().segment(0).value(), "今日");
+    EXPECT_EQ(output.preedit().segment(1).value(), "ｋ");
+  }
+
+  // 3. Complete "a" -> "きょうか", then press Space (Convert) -> candidate window
+  // should become immediately visible.
+  composer_->InsertCharacter("a");
+  Segments kyouka_segments;
+  {
+    Segment* seg = kyouka_segments.add_segment();
+    seg->set_key("きょうか");
+    converter::Candidate* cand0 = seg->add_candidate();
+    cand0->value = "強化";
+    cand0->key = "きょうか";
+    cand0->content_key = "きょうか";
+    cand0->content_value = "強化";
+    converter::Candidate* cand1 = seg->add_candidate();
+    cand1->value = "教科";
+    cand1->key = "きょうか";
+    cand1->content_key = "きょうか";
+    cand1->content_value = "教科";
+  }
+
+  EXPECT_CALL(*mock_converter, StartConversion(_, _))
+      .WillRepeatedly(DoAll(SetArgPointee<1>(kyouka_segments), Return(true)));
+
+  EXPECT_TRUE(converter.Suggest(*composer_));
+  EXPECT_FALSE(IsCandidateListVisible(converter));
+
+  // Press Space -> Convert()
+  EXPECT_TRUE(converter.Convert(*composer_));
+  EXPECT_TRUE(IsCandidateListVisible(converter));
+  {
+    commands::Output output;
+    converter.FillOutput(*composer_, &output);
+    EXPECT_TRUE(output.has_candidate_window());
+  }
+
+  absl::SetFlag(&FLAGS_enable_live_conversion, false);
+}
+
+TEST_F(EngineConverterTest, LiveConversionCommitPreeditAndTrailingN) {
+  absl::SetFlag(&FLAGS_enable_live_conversion, true);
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+
+  // Type "kan" -> preedit is "かｎ", pred_key is "か", conv_key is "かん".
+  composer_->InsertCharacter("kan");
+
+  Segments ka_segments;
+  {
+    Segment* seg = ka_segments.add_segment();
+    seg->set_key("か");
+    converter::Candidate* cand = seg->add_candidate();
+    cand->value = "蚊";
+    cand->key = "か";
+    cand->content_key = "か";
+    cand->content_value = "蚊";
+  }
+  Segments kan_segments;
+  {
+    Segment* seg = kan_segments.add_segment();
+    seg->set_key("かん");
+    converter::Candidate* cand = seg->add_candidate();
+    cand->value = "缶";
+    cand->key = "かん";
+    cand->content_key = "かん";
+    cand->content_value = "缶";
+  }
+
+  EXPECT_CALL(*mock_converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(ka_segments), Return(true)))
+      .WillOnce(DoAll(SetArgPointee<1>(kan_segments), Return(true)));
+  EXPECT_CALL(*mock_converter, CommitSegmentValue(_, 0, 0))
+      .WillOnce(Return(true));
+  EXPECT_CALL(*mock_converter, FinishConversion(_, _));
+
+  EXPECT_TRUE(converter.Suggest(*composer_));
+  converter.CommitPreedit(*composer_, Context::default_instance());
+
+  commands::Output output;
+  converter.FillOutput(*composer_, &output);
+  EXPECT_TRUE(output.has_result());
+  EXPECT_EQ(output.result().value(), "缶");
+  EXPECT_EQ(output.result().key(), "かん");
+
+  absl::SetFlag(&FLAGS_enable_live_conversion, false);
 }
 
 }  // namespace engine

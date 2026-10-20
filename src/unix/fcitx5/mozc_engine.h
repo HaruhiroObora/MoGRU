@@ -121,6 +121,8 @@ FCITX_CONFIGURATION(
         IntConstrain(0, 100000)};
     Option<bool> showGruScore{
         this, "ShowGruScore", _("Show GRU Score in candidate description"), true};
+    Option<bool> enableLiveConversion{
+        this, "EnableLiveConversion", _("Enable Live Conversion"), true};
 
     ExternalOption configTool{this, "ConfigTool", _("Configuration Tool"),
                               toolCommand("--mode=config_dialog")};

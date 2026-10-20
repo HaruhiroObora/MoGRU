@@ -116,6 +116,8 @@ GruChardataPath=$DEFAULT_CHAR
 GruScoreWeight=800
 # Show GRU Score in candidate description
 ShowGruScore=True
+# Enable Live Conversion
+EnableLiveConversion=True
 EOF
 else
   # If GruModelPath or GruChardataPath is empty in existing config, fill with default values
@@ -136,6 +138,10 @@ else
   if ! grep -q "^ShowGruScore=" "$CONF_FILE"; then
     echo "[+] Adding ShowGruScore=True in $CONF_FILE ..."
     echo "ShowGruScore=True" >> "$CONF_FILE"
+  fi
+  if ! grep -q "^EnableLiveConversion=" "$CONF_FILE"; then
+    echo "[+] Adding EnableLiveConversion=True in $CONF_FILE ..."
+    echo "EnableLiveConversion=True" >> "$CONF_FILE"
   fi
 fi
 

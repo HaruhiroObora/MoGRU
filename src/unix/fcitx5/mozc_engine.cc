@@ -55,6 +55,7 @@ ABSL_DECLARE_FLAG(std::string, gru_model_path);
 ABSL_DECLARE_FLAG(std::string, gru_chardata_path);
 ABSL_DECLARE_FLAG(double, gru_score_weight);
 ABSL_DECLARE_FLAG(bool, show_gru_score);
+ABSL_DECLARE_FLAG(bool, enable_live_conversion);
 
 namespace fcitx {
 
@@ -257,6 +258,8 @@ void MozcEngine::SyncGruFlags() {
   absl::SetFlag(&FLAGS_gru_score_weight,
                 static_cast<double>(config_.gruScoreWeight.value()));
   absl::SetFlag(&FLAGS_show_gru_score, config_.showGruScore.value());
+  absl::SetFlag(&FLAGS_enable_live_conversion,
+                config_.enableLiveConversion.value());
 }
 
 void MozcEngine::setConfig(const RawConfig& config) {

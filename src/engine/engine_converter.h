@@ -355,6 +355,8 @@ class EngineConverter : public EngineConverterInterface {
   void ResizeSegmentWidth(const composer::Composer& composer, int delta);
 
   void FillConversion(commands::Preedit* preedit) const;
+  void FillLiveConversionPreedit(const composer::Composer& composer,
+                                 commands::Preedit* preedit) const;
   void FillResult(commands::Result* result) const;
   void FillCandidateWindow(commands::CandidateWindow* candidate_window) const;
 
@@ -428,6 +430,11 @@ class EngineConverter : public EngineConverterInterface {
   // Mutable values of |config_|.  These values may be changed temporarily per
   // session.
   bool use_cascading_window_;
+
+  // Live conversion state.
+  bool live_conversion_active_ = false;
+  std::string live_conversion_key_;
+  std::string live_conversion_tail_;
 };
 
 }  // namespace engine

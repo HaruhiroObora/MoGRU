@@ -42,6 +42,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/flags/flag.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/strings/str_cat.h"
@@ -63,6 +64,9 @@
 #include "protocol/config.pb.h"
 #include "request/conversion_request.h"
 #include "transliteration/transliteration.h"
+
+ABSL_FLAG(bool, enable_live_conversion, false,
+          "Enable live conversion during composition.");
 
 namespace mozc {
 namespace engine {
@@ -149,6 +153,10 @@ bool EngineConverter::Convert(const composer::Composer& composer,
                               const commands::Context& context,
                               const ConversionPreferences& preferences) {
   DCHECK(CheckState(COMPOSITION | SUGGESTION | CONVERSION));
+  const bool was_live_conversion = live_conversion_active_;
+  live_conversion_active_ = false;
+  live_conversion_key_.clear();
+  live_conversion_tail_.clear();
 
   DCHECK(request_);
   DCHECK(config_);
@@ -174,8 +182,10 @@ bool EngineConverter::Convert(const composer::Composer& composer,
   state_ = CONVERSION;
   // If TalkBack is enabled, the candidate list should be always visible to
   // propagate the candidate words to TalkBack. Otherwise, the candidate list
-  // is not visible on the first conversion.
-  candidate_list_visible_ = request_->is_a11y_talkback_enabled();
+  // is not visible on the first conversion (unless transitioning from live
+  // conversion, where the first candidate is already shown inline).
+  candidate_list_visible_ =
+      request_->is_a11y_talkback_enabled() || was_live_conversion;
   UpdateCandidateList();
   InitializeSelectedCandidateIndices();
   return true;
@@ -502,6 +512,66 @@ bool EngineConverter::Suggest(const composer::Composer& composer,
     return false;
   }
 
+  // Live conversion: convert the confirmed kana portion inline while hiding
+  // the candidate window during composition.
+  if (absl::GetFlag(FLAGS_enable_live_conversion)) {
+    if (composer.Empty() ||
+        composer.GetInputMode() != transliteration::HIRAGANA ||
+        composer.GetOutputMode() != transliteration::HIRAGANA ||
+        composer.GetCursor() != composer.GetLength()) {
+      return false;
+    }
+
+    const std::string pred_key = composer.GetQueryForPrediction();
+    if (pred_key.empty() ||
+        Util::GetScriptType(pred_key) == Util::ALPHABET) {
+      return false;
+    }
+
+    const std::string preedit = composer.GetStringForPreedit();
+    const size_t pred_chars = Util::CharsLen(pred_key);
+    const size_t preedit_chars = Util::CharsLen(preedit);
+    std::string tail;
+    if (preedit_chars > pred_chars) {
+      tail = std::string(
+          Util::Utf8SubString(preedit, pred_chars, preedit_chars - pred_chars));
+    }
+
+    ConversionRequest::Options live_options;
+    live_options.enable_user_history_for_conversion = preferences.use_history;
+    live_options.composer_key_selection = ConversionRequest::PREDICTION_KEY;
+    SetRequestType(ConversionRequest::CONVERSION, live_options);
+    segments_.clear_conversion_segments();
+
+    DCHECK(request_);
+    DCHECK(config_);
+    const ConversionRequest live_request =
+        ConversionRequestBuilder()
+            .SetComposer(composer)
+            .SetRequestView(*request_)
+            .SetContextView(context)
+            .SetConfigView(*config_)
+            .SetOptions(std::move(live_options))
+            .Build();
+
+    if (!converter_->StartConversion(live_request, &segments_) ||
+        segments_.conversion_segments_size() == 0) {
+      converter_->CancelConversion(&segments_);
+      ResetState();
+      return false;
+    }
+
+    segment_index_ = 0;
+    state_ = SUGGESTION;
+    live_conversion_active_ = true;
+    live_conversion_key_ = pred_key;
+    live_conversion_tail_ = std::move(tail);
+    UpdateCandidateList();
+    candidate_list_visible_ = false;
+    InitializeSelectedCandidateIndices();
+    return true;
+  }
+
   // Initialize the conversion request and segments for suggestion.
   ConversionRequest::Options options;
   options.enable_user_history_for_conversion = preferences.use_history;
@@ -616,6 +686,9 @@ bool EngineConverter::Predict(const composer::Composer& composer,
   // DCHECK(CheckState(COMPOSITION | SUGGESTION | PREDICTION));
   DCHECK(CheckState(COMPOSITION | SUGGESTION | CONVERSION | PREDICTION));
   ResetResult();
+  live_conversion_active_ = false;
+  live_conversion_key_.clear();
+  live_conversion_tail_.clear();
 
   // Initialize the segments and conversion_request for prediction
   ConversionRequest::Options options;
@@ -920,6 +993,83 @@ void EngineConverter::CommitSegmentsInternal(const composer::Composer& composer,
 
 void EngineConverter::CommitPreedit(const composer::Composer& composer,
                                     const commands::Context& context) {
+  if (live_conversion_active_) {
+    const std::string conv_key = composer.GetQueryForConversion();
+    // If a trailing 'n' was resolved to 'ん' by GetQueryForConversion()
+    // (e.g. "kan" -> pred_key="か", conv_key="かん"), re-run conversion with
+    // the full conversion key before committing.
+    if (conv_key != live_conversion_key_ && conv_key.ends_with("ん")) {
+      ConversionRequest::Options live_options;
+      live_options.enable_user_history_for_conversion =
+          conversion_preferences_.use_history;
+      SetRequestType(ConversionRequest::CONVERSION, live_options);
+      segments_.clear_conversion_segments();
+      const ConversionRequest live_request =
+          ConversionRequestBuilder()
+              .SetComposer(composer)
+              .SetRequestView(*request_)
+              .SetContextView(context)
+              .SetConfigView(*config_)
+              .SetOptions(std::move(live_options))
+              .Build();
+      if (converter_->StartConversion(live_request, &segments_) &&
+          segments_.conversion_segments_size() > 0) {
+        live_conversion_key_ = conv_key;
+        live_conversion_tail_.clear();
+        segment_index_ = 0;
+        UpdateCandidateList();
+        InitializeSelectedCandidateIndices();
+      }
+    }
+
+    if (segments_.conversion_segments_size() > 0) {
+      const std::string tail =
+          TextNormalizer::NormalizeText(live_conversion_tail_);
+      state_ = CONVERSION;
+      ResetResult();
+      if (!UpdateResult(0, segments_.conversion_segments_size(), nullptr)) {
+        Cancel();
+        ResetState();
+        return;
+      }
+      if (!tail.empty()) {
+        result_.mutable_key()->append(tail);
+        result_.mutable_value()->append(tail);
+        commands::ResultToken* token = result_.add_tokens();
+        token->set_key(tail);
+        token->set_value(tail);
+        output::FillCursorOffsetResult(CalculateCursorOffset(result_.value()),
+                                       &result_);
+      }
+
+      for (size_t i = 0; i < segments_.conversion_segments_size();
+           i += GetSegmentSpan(i)) {
+        const int cand_idx = GetCandidateIndexForConverter(i);
+        if (!converter_->CommitSegmentValue(&segments_, i, cand_idx)) {
+          LOG(WARNING) << "Failed to commit segment " << i;
+        }
+      }
+      CommitSegmentsSize(state_, context);
+      ConversionRequest::Options finish_options;
+      if (!tail.empty()) {
+        finish_options.composer_key_selection =
+            ConversionRequest::PREDICTION_KEY;
+      }
+      SetRequestType(ConversionRequest::CONVERSION, finish_options);
+      const ConversionRequest conversion_request =
+          ConversionRequestBuilder()
+              .SetComposer(composer)
+              .SetRequestView(*request_)
+              .SetContextView(context)
+              .SetConfigView(*config_)
+              .SetOptions(std::move(finish_options))
+              .Build();
+      converter_->FinishConversion(conversion_request, &segments_);
+      ResetState();
+      return;
+    }
+  }
+
   const std::string key = composer.GetQueryForConversion();
   const std::string preedit = composer.GetStringForSubmission();
   std::string normalized_preedit = TextNormalizer::NormalizeText(preedit);
@@ -1288,7 +1438,11 @@ void EngineConverter::FillOutput(const composer::Composer& composer,
     // When the suggestion comes from zero query suggestion, the
     // composer is empty.  In that case, preedit is not rendered.
     if (!composer.Empty()) {
-      output::FillPreedit(composer, output->mutable_preedit());
+      if (live_conversion_active_) {
+        FillLiveConversionPreedit(composer, output->mutable_preedit());
+      } else {
+        output::FillPreedit(composer, output->mutable_preedit());
+      }
     }
   } else if (CheckState(PREDICTION | CONVERSION)) {
     // Conversion on Prediction or Conversion
@@ -1346,6 +1500,9 @@ void EngineConverter::ResetState() {
   candidate_list_.Clear();
   selected_candidate_indices_.clear();
   incognito_segments_.Clear();
+  live_conversion_active_ = false;
+  live_conversion_key_.clear();
+  live_conversion_tail_.clear();
 }
 
 void EngineConverter::SegmentFocus() {
@@ -1683,6 +1840,48 @@ void EngineConverter::FillConversion(commands::Preedit* preedit) const {
   DCHECK(CheckState(PREDICTION | CONVERSION));
   output::FillConversion(segments_, segment_index_,
                          candidate_list_.focused_id(), preedit);
+}
+
+void EngineConverter::FillLiveConversionPreedit(
+    const composer::Composer& composer, commands::Preedit* preedit) const {
+  DCHECK(CheckState(SUGGESTION));
+  size_t cursor = 0;
+  for (size_t i = 0; i < segments_.conversion_segments_size();
+       i += GetSegmentSpan(i)) {
+    const Segment& segment = segments_.conversion_segment(i);
+    if (segment.candidates_size() == 0) {
+      continue;
+    }
+    const converter::Candidate& candidate = GetSelectedCandidate(i);
+    std::string normalized_key = TextNormalizer::NormalizeText(
+        (candidate.effective_converted_segment_count() > 1 &&
+         !candidate.key.empty())
+            ? candidate.key
+            : segment.key());
+    if (candidate.value.empty()) {
+      continue;
+    }
+    commands::Preedit::Segment* seg = preedit->add_segment();
+    seg->set_key(std::move(normalized_key));
+    seg->set_value_length(Util::CharsLen(candidate.value));
+    seg->set_value(candidate.value);
+    seg->set_annotation(commands::Preedit::Segment::UNDERLINE);
+    cursor += seg->value_length();
+  }
+  if (!live_conversion_tail_.empty()) {
+    std::string normalized_tail =
+        TextNormalizer::NormalizeText(live_conversion_tail_);
+    if (!normalized_tail.empty()) {
+      commands::Preedit::Segment* tail_seg = preedit->add_segment();
+      tail_seg->set_key(normalized_tail);
+      tail_seg->set_value_length(Util::CharsLen(normalized_tail));
+      tail_seg->set_value(std::move(normalized_tail));
+      tail_seg->set_annotation(commands::Preedit::Segment::UNDERLINE);
+      cursor += tail_seg->value_length();
+    }
+  }
+  preedit->set_cursor(static_cast<uint32_t>(cursor));
+  preedit->set_is_toggleable(composer.IsToggleable());
 }
 
 void EngineConverter::FillResult(commands::Result* result) const {

@@ -24,6 +24,7 @@
 
 ABSL_DECLARE_FLAG(bool, enable_gru_rewriter);
 ABSL_DECLARE_FLAG(bool, show_gru_score);
+ABSL_DECLARE_FLAG(bool, enable_live_conversion);
 
 namespace fcitx {
 
@@ -32,6 +33,7 @@ namespace {
 std::unique_ptr<mozc::SessionHandler> CreateSessionHandler() {
   absl::SetFlag(&FLAGS_enable_gru_rewriter, true);
   absl::SetFlag(&FLAGS_show_gru_score, true);
+  absl::SetFlag(&FLAGS_enable_live_conversion, true);
   auto engine =
       mozc::Engine::CreateEngine(std::make_unique<mozc::oss::OssDataManager>());
   DCHECK_OK(engine);
