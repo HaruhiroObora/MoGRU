@@ -280,6 +280,84 @@ TEST_F(GruRewriterTest, SurroundingTextPrefixCaching) {
   }
 }
 
+TEST_F(GruRewriterTest, KoushiKekkanFocusRerank) {
+  // Use actual model and chardata if available, or dummy
+  rewriter_->Reload();
+
+  ConversionRequest request;
+  Segments segments;
+
+  // Segment 0: "こうし" -> "講師" (cost 3000), "格子" (cost 5000)
+  Segment* seg0 = segments.add_segment();
+  seg0->set_key("こうし");
+  AddCandidate("こうし", "講師", 3000, seg0);
+  AddCandidate("こうし", "格子", 5000, seg0);
+
+  // Segment 1: "けっかん" -> "血管" (cost 4500), "欠陥" (cost 4942)
+  Segment* seg1 = segments.add_segment();
+  seg1->set_key("けっかん");
+  AddCandidate("けっかん", "血管", 4500, seg1);
+  AddCandidate("けっかん", "欠陥", 4942, seg1);
+
+  rewriter_->Rewrite(request, &segments);
+
+  // Focus segment 0, candidate 1 ("格子")
+  const bool focus_handled = rewriter_->Focus(&segments, 0, 1);
+  if (focus_handled) {
+    // If the model is loaded and distinguishes "格子欠陥" over "格子血管",
+    // "欠陥" should be promoted or evaluated with combined score tag containing "[E:"
+    EXPECT_TRUE(segments.conversion_segment(1).candidate(0).description.find("[E:") !=
+                std::string::npos);
+  }
+}
+
+TEST_F(GruRewriterTest, ThreeSegmentFocusControl) {
+  rewriter_->Reload();
+
+  ConversionRequest request;
+  Segments segments;
+
+  Segment* seg0 = segments.add_segment();
+  seg0->set_key("第1");
+  AddCandidate("第1", "A0", 1000, seg0);
+  AddCandidate("第1", "A1", 1050, seg0);
+
+  Segment* seg1 = segments.add_segment();
+  seg1->set_key("第2");
+  AddCandidate("第2", "B0", 1000, seg1);
+  AddCandidate("第2", "B1", 1050, seg1);
+
+  Segment* seg2 = segments.add_segment();
+  seg2->set_key("第3");
+  AddCandidate("第3", "C0", 1000, seg2);
+  AddCandidate("第3", "C1", 1050, seg2);
+
+  rewriter_->Rewrite(request, &segments);
+
+  // 1. Focus on segment 0 candidate 1 ("A1")
+  const bool f0 = rewriter_->Focus(&segments, 0, 1);
+  if (f0) {
+    // Both segment 1 and segment 2 should be evaluated and have descriptions updated
+    EXPECT_TRUE(segments.conversion_segment(1).candidate(0).description.find("GRU:") !=
+                std::string::npos);
+    EXPECT_TRUE(segments.conversion_segment(2).candidate(0).description.find("GRU:") !=
+                std::string::npos);
+  }
+
+  // 2. Focus on segment 1 candidate 1 ("B1")
+  const bool f1 = rewriter_->Focus(&segments, 1, 1);
+  if (f1) {
+    // Segment 2 should be evaluated
+    EXPECT_TRUE(segments.conversion_segment(2).candidate(0).description.find("GRU:") !=
+                std::string::npos);
+  }
+
+  // 3. Focus on last segment (segment 2)
+  const bool f2 = rewriter_->Focus(&segments, 2, 0);
+  // Last segment focus should return false (no subsequent segments to rerank)
+  EXPECT_FALSE(f2);
+}
+
 }  // namespace
 }  // namespace mozc
 
