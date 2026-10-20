@@ -1,5 +1,5 @@
 # ==============================================================================
-# Mozc GRU Build & Install Script for Windows (PowerShell)
+# MoGRU Build & Install Script for Windows (PowerShell)
 # ==============================================================================
 # Run with: Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install_windows.ps1
 
@@ -8,7 +8,7 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $ScriptDir
 
-Write-Host "=== Mozc GRU Installer for Windows ===" -ForegroundColor Cyan
+Write-Host "=== MoGRU Installer for Windows ===" -ForegroundColor Cyan
 Write-Host "Repository Root: $RepoRoot"
 
 # 1. Check Administrator Rights (recommended for MSI installation)
@@ -89,5 +89,5 @@ if ((Test-Path $ModelSrc) -and (Test-Path $ChardataSrc)) {
 }
 
 Write-Host "=== Installation Complete! ===" -ForegroundColor Green
-Write-Host "Mozc with GRU Language Model is now installed on Windows."
-Write-Host "You can switch to Mozc using Windows Key + Space."
+Write-Host "MoGRU (Mozc with GRU Language Model) is now installed on Windows."
+Write-Host "You can switch to MoGRU using Windows Key + Space."

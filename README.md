@@ -1,11 +1,11 @@
-[Mozc GRU - Neural Language Model Integrated Mozc](https://github.com/google/mozc)
+[MoGRU - Neural Language Model Integrated Mozc](https://github.com/HaruhiroObora/MoGRU)
 ========================================================================
 
-本リポジトリは、オープンソースかな漢字変換エンジン **Mozc** に、**文字単位 GRU ニューラル言語モデル（GRU Scorer）** を統合した拡張版です。
+本リポジトリは、オープンソースかな漢字変換エンジン **Mozc** に、**文字単位 GRU ニューラル言語モデル（GRU Scorer）** を統合した拡張版 **MoGRU** です。
 
 ### 主な特徴
 - **大域的ビームサーチ ($B=8$)**: 複数文節を跨いだ文脈をGRU言語モデルで評価し、文脈に応じた適切な同音異義語を自動リランキング。
-- **独立動作（共存対応）**: システム標準の `mozc` と競合せず、Fcitx5 上で `Mozc (GRU)` として独立して登録・利用可能。
+- **独立動作（共存対応）**: システム標準の `mozc` と競合せず、Fcitx5 上で `MoGRU` として独立して登録・利用可能。
 - **GUI設定対応**: Fcitx5 設定画面からモデルパスや文脈重み係数 $\alpha$（デフォルト 800）をリアルタイムに調整可能。
 - **マルチプラットフォーム**: Linux (Fcitx5), macOS, Windows をサポート。
 
@@ -18,26 +18,26 @@
 
 ### 🐧 Linux (Fcitx5)
 ```bash
-git clone https://github.com/HaruhiroObora/mozc-gru.git
-cd mozc-gru
+git clone https://github.com/HaruhiroObora/MoGRU.git
+cd MoGRU
 ./install.sh
 # または: ./scripts/install_linux.sh
 ```
 
 ### 🍎 macOS
 ```bash
-git clone https://github.com/HaruhiroObora/mozc-gru.git
-cd mozc-gru
+git clone https://github.com/HaruhiroObora/MoGRU.git
+cd MoGRU
 ./scripts/install_macos.sh
 ```
 > [!TIP]
-> GitHub Actions の各実行画面（Artifacts）からビルド済みの `Mozc_arm64.pkg` / `Mozc_intel64.pkg` をダウンロードして直接実行・インストールすることも可能です。
+> GitHub Actions の各実行画面（Artifacts）からビルド済みのパッケージをダウンロードして直接実行・インストールすることも可能です。
 
 
 ### 🪟 Windows (PowerShell)
 ```powershell
-git clone https://github.com/HaruhiroObora/mozc-gru.git
-cd mozc-gru
+git clone https://github.com/HaruhiroObora/MoGRU.git
+cd MoGRU
 Set-ExecutionPolicy Bypass -Scope Process -Force
 .\scripts\install_windows.ps1
 ```
@@ -49,7 +49,7 @@ Build Status
 
 | Linux | Windows | macOS |
 |:-----:|:-------:|:-----:|
-| [![Linux](https://github.com/HaruhiroObora/mozc-gru/actions/workflows/linux.yaml/badge.svg)](https://github.com/HaruhiroObora/mozc-gru/actions/workflows/linux.yaml) | [![Windows](https://github.com/HaruhiroObora/mozc-gru/actions/workflows/windows.yaml/badge.svg)](https://github.com/HaruhiroObora/mozc-gru/actions/workflows/windows.yaml) | [![macOS](https://github.com/HaruhiroObora/mozc-gru/actions/workflows/macos.yaml/badge.svg)](https://github.com/HaruhiroObora/mozc-gru/actions/workflows/macos.yaml) |
+| [![Linux](https://github.com/HaruhiroObora/MoGRU/actions/workflows/linux.yaml/badge.svg)](https://github.com/HaruhiroObora/MoGRU/actions/workflows/linux.yaml) | [![Windows](https://github.com/HaruhiroObora/MoGRU/actions/workflows/windows.yaml/badge.svg)](https://github.com/HaruhiroObora/MoGRU/actions/workflows/windows.yaml) | [![macOS](https://github.com/HaruhiroObora/MoGRU/actions/workflows/macos.yaml/badge.svg)](https://github.com/HaruhiroObora/MoGRU/actions/workflows/macos.yaml) |
 
 
 What's Mozc?

@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 OS_NAME="$(uname -s 2>/dev/null || echo "Unknown")"
 
-echo "=== Mozc GRU (Neural Language Model) Installer ==="
+echo "=== MoGRU (Neural Language Model) Installer ==="
 echo "Detected Operating System: $OS_NAME"
 
 case "$OS_NAME" in

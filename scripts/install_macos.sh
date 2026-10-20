@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Mozc GRU Build & Install Script for macOS
+# MoGRU Build & Install Script for macOS
 # ==============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-echo "=== Mozc GRU Installer for macOS ==="
+echo "=== MoGRU Installer for macOS ==="
 echo "Repository Root: $REPO_ROOT"
 
 # 1. Check OS
@@ -69,7 +69,7 @@ echo "=== Step 2/3: Building Mozc Package (-c opt) ==="
 }
 
 # 7. Install
-echo "=== Step 3/3: Installing Mozc GRU ==="
+echo "=== Step 3/3: Installing MoGRU ==="
 
 # Copy GRU model files to user profile directory
 for dir in \
@@ -108,7 +108,7 @@ elif [ -d "$REPO_ROOT/src/bazel-bin/mac/Mozc.app" ]; then
 fi
 
 echo "=== Installation Complete! ==="
-echo "Please follow these steps to enable Mozc:"
+echo "Please follow these steps to enable MoGRU:"
 echo "1. Open 'System Settings' -> 'Keyboard' -> 'Text Input' -> 'Input Sources'."
-echo "2. Click '+' and add 'Japanese (Mozc)'."
-echo "3. If Mozc does not appear, log out and log back in."
+echo "2. Click '+' and add 'Japanese (MoGRU)'."
+echo "3. If MoGRU does not appear, log out and log back in."

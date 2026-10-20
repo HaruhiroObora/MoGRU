@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Mozc GRU (fcitx5-mozc-gru) Build & Install Script for Linux
+# MoGRU (fcitx5-mogru) Build & Install Script for Linux
 # ==============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-echo "=== Mozc GRU (Fcitx5) Installer for Linux ==="
+echo "=== MoGRU (Fcitx5) Installer for Linux ==="
 echo "Repository Root: $REPO_ROOT"
 
 # 1. Check Bazel / Bazelisk
@@ -47,29 +47,34 @@ if command -v apt-get &>/dev/null; then
   fi
 fi
 
-# 3. Build fcitx5-mozc-gru.so
-echo "=== Building fcitx5-mozc-gru.so (-c opt) ==="
+# 3. Build fcitx5-mogru.so
+echo "=== Building fcitx5-mogru.so (-c opt) ==="
 cd "$REPO_ROOT/src"
-"$BAZEL_BIN" build -c opt //unix/fcitx5:fcitx5-mozc-gru.so --//unix/fcitx5:use_server=False
+"$BAZEL_BIN" build -c opt //unix/fcitx5:fcitx5-mogru.so --//unix/fcitx5:use_server=False
 
 # 4. Install plugin and addon definitions
-echo "=== Installing Mozc GRU to ~/.local ==="
+echo "=== Installing MoGRU to ~/.local ==="
 mkdir -p "$HOME/.local/lib/fcitx5"
 mkdir -p "$HOME/.local/share/fcitx5/addon"
 mkdir -p "$HOME/.local/share/fcitx5/inputmethod"
 mkdir -p "$HOME/.config/mozc"
 
-# Copy library
+# Clean up older mozc-gru references to prevent duplicates
 rm -f "$HOME/.local/lib/fcitx5/fcitx5-mozc-gru.so"
-cp -f "$REPO_ROOT/src/bazel-bin/unix/fcitx5/fcitx5-mozc-gru.so" "$HOME/.local/lib/fcitx5/"
-chmod 755 "$HOME/.local/lib/fcitx5/fcitx5-mozc-gru.so"
+rm -f "$HOME/.local/share/fcitx5/addon/mozc-gru.conf"
+rm -f "$HOME/.local/share/fcitx5/inputmethod/mozc-gru.conf"
+
+# Copy library
+rm -f "$HOME/.local/lib/fcitx5/fcitx5-mogru.so"
+cp -f "$REPO_ROOT/src/bazel-bin/unix/fcitx5/fcitx5-mogru.so" "$HOME/.local/lib/fcitx5/"
+chmod 755 "$HOME/.local/lib/fcitx5/fcitx5-mogru.so"
 
 # Create / copy addon conf
-cat << 'EOF' > "$HOME/.local/share/fcitx5/addon/mozc-gru.conf"
+cat << 'EOF' > "$HOME/.local/share/fcitx5/addon/mogru.conf"
 [Addon]
-Name=Mozc (GRU)
+Name=MoGRU
 Category=InputMethod
-Library=fcitx5-mozc-gru
+Library=fcitx5-mogru
 Type=SharedLibrary
 OnDemand=True
 Configurable=True
@@ -79,13 +84,13 @@ Configurable=True
 EOF
 
 # Create / copy input method conf
-cat << 'EOF' > "$HOME/.local/share/fcitx5/inputmethod/mozc-gru.conf"
+cat << 'EOF' > "$HOME/.local/share/fcitx5/inputmethod/mogru.conf"
 [InputMethod]
-Name=Mozc (GRU)
+Name=MoGRU
 Icon=fcitx_mozc
-Label=あ(G)
+Label=あ(M)
 LangCode=ja
-Addon=mozc-gru
+Addon=mogru
 Configurable=True
 EOF
 
@@ -99,14 +104,19 @@ if [ -f "$REPO_ROOT/models/grumodel.bin" ] && [ -f "$REPO_ROOT/models/chardata.b
   cp -f "$REPO_ROOT/models/chardata.bin" "$HOME/.mozc/"
 fi
 
-# 6. Configure default Fcitx5 settings for mozc-gru
+# 6. Configure default Fcitx5 settings for MoGRU
 mkdir -p "$HOME/.config/fcitx5/conf"
-CONF_FILE="$HOME/.config/fcitx5/conf/mozc-gru.conf"
+CONF_FILE="$HOME/.config/fcitx5/conf/mogru.conf"
 DEFAULT_MODEL="$HOME/.config/mozc/grumodel.bin"
 DEFAULT_CHAR="$HOME/.config/mozc/chardata.bin"
 
+# Migrate old config if present
+if [ ! -f "$CONF_FILE" ] && [ -f "$HOME/.config/fcitx5/conf/mozc-gru.conf" ]; then
+  cp -f "$HOME/.config/fcitx5/conf/mozc-gru.conf" "$CONF_FILE"
+fi
+
 if [ ! -f "$CONF_FILE" ]; then
-  echo "[+] Generating initial Fcitx5 configuration for mozc-gru ..."
+  echo "[+] Generating initial Fcitx5 configuration for MoGRU ..."
   cat << EOF > "$CONF_FILE"
 # GRU Model Path (grumodel.bin)
 GruModelPath=$DEFAULT_MODEL
@@ -155,5 +165,5 @@ else
 fi
 
 echo "=== Installation Complete! ==="
-echo "You can now add 'Mozc (GRU)' in Fcitx5 Configuration (fcitx5-config-qt)."
+echo "You can now add 'MoGRU' in Fcitx5 Configuration (fcitx5-config-qt)."
 echo "Model paths and Alpha weight can be customized via Fcitx5 GUI Settings."

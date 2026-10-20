@@ -1,4 +1,4 @@
-# Mozc GRU 言語モデル統合モジュール (`gru_scorer`)
+# MoGRU 言語モデル統合モジュール (`gru_scorer`)
 
 このディレクトリは、Mozc のかな漢字変換エンジンに対して文字単位 GRU 言語モデルを用いたリランキングを行うための推論エンジンおよび関連コンポーネントを含んでいます。
 
@@ -19,11 +19,11 @@ bazel test //gru_scorer:gru_scorer_test
 bazel test //rewriter:gru_rewriter_test
 
 # 最適化ビルド
-bazel build -c opt //unix/fcitx5:fcitx5-mozc-gru.so --//unix/fcitx5:use_server=False
+bazel build -c opt //unix/fcitx5:fcitx5-mogru.so --//unix/fcitx5:use_server=False
 
 # インストールと再起動
 mkdir -p ~/.local/lib/fcitx5
-cp bazel-bin/unix/fcitx5/fcitx5-mozc-gru.so ~/.local/lib/fcitx5/
-chmod 755 ~/.local/lib/fcitx5/fcitx5-mozc-gru.so
+cp bazel-bin/unix/fcitx5/fcitx5-mogru.so ~/.local/lib/fcitx5/
+chmod 755 ~/.local/lib/fcitx5/fcitx5-mogru.so
 FCITX_ADDON_DIRS="/home/haruhiro/.local/lib/fcitx5:/usr/lib/x86_64-linux-gnu/fcitx5" fcitx5 -r -d
 ```

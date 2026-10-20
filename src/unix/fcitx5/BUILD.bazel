@@ -191,3 +191,15 @@ mozc_cc_binary(
         ":mozc_engine",
     ],
 )
+
+mozc_cc_binary(
+    name = "fcitx5-mogru.so",
+    srcs = [
+        "mozc_engine_factory.cc",
+    ],
+    linkshared = 1,
+    linkstatic = 1,
+    deps = [
+        ":mozc_engine",
+    ],
+)

@@ -162,8 +162,8 @@ MozcEngine::MozcEngine(Instance* instance)
   instance_->inputContextManager().registerProperty("mozcGruState", &factory_);
   instance_->userInterfaceManager().registerAction("mozc-gru-tool",
                                                    &toolAction_);
-  toolAction_.setShortText(_("Mozc (GRU) Settings"));
-  toolAction_.setLongText(_("Mozc (GRU) Settings"));
+  toolAction_.setShortText(_("MoGRU Settings"));
+  toolAction_.setLongText(_("MoGRU Settings"));
   toolAction_.setIcon("fcitx_mozc_tool");
 
   int i = 0;
@@ -213,7 +213,7 @@ MozcEngine::MozcEngine(Instance* instance)
 
   instance_->userInterfaceManager().registerAction("mozc-gru-tool-about",
                                                    &aboutAction_);
-  aboutAction_.setShortText(_("About Mozc"));
+  aboutAction_.setShortText(_("About MoGRU"));
   aboutAction_.connect<SimpleAction::Activated>([](InputContext*) {
     mozc::Process::SpawnMozcProcess("mozc_tool", "--mode=about_dialog");
   });
