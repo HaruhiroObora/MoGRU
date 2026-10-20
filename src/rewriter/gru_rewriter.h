@@ -41,6 +41,9 @@ class GruRewriter : public RewriterInterface {
   bool Rewrite(const ConversionRequest& request,
                Segments* segments) const override;
 
+  bool Focus(Segments* segments, size_t segment_index,
+             int candidate_index) const override;
+
   std::optional<ResizeSegmentsRequest> CheckResizeSegmentsRequest(
       const ConversionRequest& request,
       const Segments& segments) const override;

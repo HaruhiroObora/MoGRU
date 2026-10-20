@@ -9,6 +9,11 @@ load(
 
 package(default_visibility = ["//visibility:public"])
 
+exports_files([
+    "chardata.bin",
+    "dummy_model.bin",
+])
+
 mozc_cc_library(
     name = "charindex",
     srcs = ["charindex.cc"],

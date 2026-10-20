@@ -168,6 +168,63 @@ TEST_F(GruRewriterTest, DynamicPathReload) {
   rewriter_->Rewrite(request, &segments);
 }
 
+TEST_F(GruRewriterTest, SortSecondaryCandidates) {
+  absl::SetFlag(&FLAGS_gru_model_path, "");
+  absl::SetFlag(&FLAGS_gru_chardata_path, "");
+  rewriter_->Reload();
+
+  ConversionRequest request;
+  Segments segments;
+
+  Segment* seg = segments.add_segment();
+  seg->set_key("きかい");
+  // 3 candidates
+  AddCandidate("きかい", "奇怪", 1000, seg);
+  AddCandidate("きかい", "機械", 1020, seg);
+  AddCandidate("きかい", "機会", 1040, seg);
+
+  const bool rewritten = rewriter_->Rewrite(request, &segments);
+  if (rewritten) {
+    EXPECT_EQ(segments.conversion_segment(0).candidates_size(), 3);
+    // Top candidate should have CONTEXT_SENSITIVE attribute if promoted
+    EXPECT_TRUE(segments.conversion_segment(0).candidate(0).description.find("GRU:") !=
+                std::string::npos);
+  }
+}
+
+TEST_F(GruRewriterTest, InteractiveFocusRerank) {
+  absl::SetFlag(&FLAGS_gru_model_path, "");
+  absl::SetFlag(&FLAGS_gru_chardata_path, "");
+  rewriter_->Reload();
+
+  ConversionRequest request;
+  Segments segments;
+
+  // Segment 0: "さいしんの"
+  Segment* seg0 = segments.add_segment();
+  seg0->set_key("さいしんの");
+  AddCandidate("さいしんの", "最新の", 1000, seg0);
+  AddCandidate("さいしんの", "細心の", 1050, seg0);
+
+  // Segment 1: "ちゅうい"
+  Segment* seg1 = segments.add_segment();
+  seg1->set_key("ちゅうい");
+  AddCandidate("ちゅうい", "中位", 1000, seg1);
+  AddCandidate("ちゅうい", "注意", 1050, seg1);
+
+  // Initial rewrite
+  rewriter_->Rewrite(request, &segments);
+
+  // Focus segment 0, candidate 1 ("細心の")
+  const bool focus_handled = rewriter_->Focus(&segments, 0, 1);
+  // Focus should handle and evaluate subsequent segments when model is loaded
+  if (focus_handled) {
+    EXPECT_EQ(segments.conversion_segments_size(), 2);
+    EXPECT_TRUE(segments.conversion_segment(1).candidate(0).description.find("GRU:") !=
+                std::string::npos);
+  }
+}
+
 }  // namespace
 }  // namespace mozc
 

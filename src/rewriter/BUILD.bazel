@@ -1777,6 +1777,10 @@ mozc_cc_test(
     name = "gru_rewriter_test",
     size = "small",
     srcs = ["gru_rewriter_test.cc"],
+    data = [
+        "//gru_scorer:chardata.bin",
+        "//gru_scorer:dummy_model.bin",
+    ],
     deps = [
         ":gru_rewriter",
         "//converter:attribute",
