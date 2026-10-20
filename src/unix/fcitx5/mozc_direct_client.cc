@@ -23,6 +23,7 @@
 #include "unix/fcitx5/mozc_client_interface.h"
 
 ABSL_DECLARE_FLAG(bool, enable_gru_rewriter);
+ABSL_DECLARE_FLAG(bool, show_gru_score);
 
 namespace fcitx {
 
@@ -30,6 +31,7 @@ namespace {
 
 std::unique_ptr<mozc::SessionHandler> CreateSessionHandler() {
   absl::SetFlag(&FLAGS_enable_gru_rewriter, true);
+  absl::SetFlag(&FLAGS_show_gru_score, true);
   auto engine =
       mozc::Engine::CreateEngine(std::make_unique<mozc::oss::OssDataManager>());
   DCHECK_OK(engine);

@@ -11,6 +11,7 @@ echo "=== Mozc GRU (Fcitx5) Installer for Linux ==="
 echo "Repository Root: $REPO_ROOT"
 
 # 1. Check Bazel / Bazelisk
+export USE_BAZEL_VERSION="${USE_BAZEL_VERSION:-9.0.2}"
 BAZEL_BIN=""
 if command -v bazelisk &>/dev/null; then
   BAZEL_BIN="bazelisk"
@@ -88,11 +89,14 @@ Addon=mozc-gru
 Configurable=True
 EOF
 
-# 5. Copy GRU model weights and vocabulary to ~/.config/mozc/
+# 5. Copy GRU model weights and vocabulary to ~/.config/mozc/ and ~/.mozc/
 if [ -f "$REPO_ROOT/models/grumodel.bin" ] && [ -f "$REPO_ROOT/models/chardata.bin" ]; then
-  echo "[+] Copying default model files to ~/.config/mozc/ ..."
+  echo "[+] Copying default model files to ~/.config/mozc/ and ~/.mozc/ ..."
+  mkdir -p "$HOME/.mozc"
   cp -f "$REPO_ROOT/models/grumodel.bin" "$HOME/.config/mozc/"
   cp -f "$REPO_ROOT/models/chardata.bin" "$HOME/.config/mozc/"
+  cp -f "$REPO_ROOT/models/grumodel.bin" "$HOME/.mozc/"
+  cp -f "$REPO_ROOT/models/chardata.bin" "$HOME/.mozc/"
 fi
 
 # 6. Configure default Fcitx5 settings for mozc-gru
@@ -110,6 +114,8 @@ GruModelPath=$DEFAULT_MODEL
 GruChardataPath=$DEFAULT_CHAR
 # GRU Score Weight (Alpha)
 GruScoreWeight=800
+# Show GRU Score in candidate description
+ShowGruScore=True
 EOF
 else
   # If GruModelPath or GruChardataPath is empty in existing config, fill with default values
@@ -126,6 +132,10 @@ else
     if ! grep -q "^GruChardataPath=" "$CONF_FILE"; then
       echo "GruChardataPath=$DEFAULT_CHAR" >> "$CONF_FILE"
     fi
+  fi
+  if ! grep -q "^ShowGruScore=" "$CONF_FILE"; then
+    echo "[+] Adding ShowGruScore=True in $CONF_FILE ..."
+    echo "ShowGruScore=True" >> "$CONF_FILE"
   fi
 fi
 

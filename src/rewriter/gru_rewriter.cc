@@ -66,6 +66,13 @@ std::string ResolveFilePath(const std::string& user_specified,
     if (std::filesystem::exists(user_specified)) {
       return user_specified;
     }
+    if (user_specified[0] == '~') {
+      const char* home = std::getenv("HOME");
+      if (home != nullptr) {
+        std::string expanded = std::string(home) + user_specified.substr(1);
+        if (std::filesystem::exists(expanded)) return expanded;
+      }
+    }
     const char* test_srcdir = std::getenv("TEST_SRCDIR");
     if (test_srcdir != nullptr) {
       std::string p = FileUtil::JoinPath(test_srcdir, user_specified);
@@ -76,7 +83,18 @@ std::string ResolveFilePath(const std::string& user_specified,
     return "";
   }
 
-  // 1. ~/.config/mozc/<filename>
+  // 1. ~/.config/mozc/<filename> and ~/.mozc/<filename>
+  const char* home = std::getenv("HOME");
+  if (home != nullptr) {
+    std::string config_path = FileUtil::JoinPath(
+        home, FileUtil::JoinPath(".config/mozc", default_filename));
+    if (std::filesystem::exists(config_path)) return config_path;
+
+    std::string dot_mozc = FileUtil::JoinPath(
+        home, FileUtil::JoinPath(".mozc", default_filename));
+    if (std::filesystem::exists(dot_mozc)) return dot_mozc;
+  }
+
   const std::string user_profile = SystemUtil::GetUserProfileDirectory();
   if (!user_profile.empty()) {
     std::string path = FileUtil::JoinPath(user_profile, default_filename);

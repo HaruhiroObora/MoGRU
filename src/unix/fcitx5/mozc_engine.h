@@ -97,10 +97,18 @@ FCITX_CONFIGURATION(
     Option<Key> expand{this, "ExpandKey", _("Hotkey to expand usage"),
                        Key("Control+Alt+H")};
 
-    const std::string defaultGruModelPath_ = mozc::FileUtil::JoinPath(
-        mozc::SystemUtil::GetUserProfileDirectory(), "grumodel.bin");
-    const std::string defaultGruChardataPath_ = mozc::FileUtil::JoinPath(
-        mozc::SystemUtil::GetUserProfileDirectory(), "chardata.bin");
+    static std::string GetPreferredModelPath(const std::string& filename) {
+      const char* home = std::getenv("HOME");
+      if (home != nullptr) {
+        return mozc::FileUtil::JoinPath(
+            home, mozc::FileUtil::JoinPath(".config/mozc", filename));
+      }
+      return mozc::FileUtil::JoinPath(
+          mozc::SystemUtil::GetUserProfileDirectory(), filename);
+    }
+
+    const std::string defaultGruModelPath_ = GetPreferredModelPath("grumodel.bin");
+    const std::string defaultGruChardataPath_ = GetPreferredModelPath("chardata.bin");
 
     Option<std::string> gruModelPath{
         this, "GruModelPath", _("GRU Model Path (grumodel.bin)"),
@@ -111,6 +119,8 @@ FCITX_CONFIGURATION(
     Option<int, IntConstrain> gruScoreWeight{
         this, "GruScoreWeight", _("GRU Score Weight (Alpha)"), 800,
         IntConstrain(0, 100000)};
+    Option<bool> showGruScore{
+        this, "ShowGruScore", _("Show GRU Score in candidate description"), true};
 
     ExternalOption configTool{this, "ConfigTool", _("Configuration Tool"),
                               toolCommand("--mode=config_dialog")};

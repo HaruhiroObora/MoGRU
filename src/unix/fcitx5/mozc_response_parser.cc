@@ -167,11 +167,14 @@ class MozcCandidateList final : public CandidateList,
           candidate.annotation().has_suffix()) {
         value += candidate.annotation().suffix();
       }
-      if (use_annotation && candidate.has_annotation() &&
+      if (candidate.has_annotation() &&
           candidate.annotation().has_description()) {
-        // Display descriptions ([HALF][KATAKANA], [GREEK], [Black square],
+        // Display descriptions ([HALF][KATAKANA], [GREEK], [GRU:...],
         // etc.) as candidate comments.
-        AppendDescriptionString(comment, candidate.annotation().description());
+        if (use_annotation ||
+            candidate.annotation().description().find("GRU:") != std::string::npos) {
+          AppendDescriptionString(comment, candidate.annotation().description());
+        }
       }
 
       const bool is_current =
