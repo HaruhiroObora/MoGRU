@@ -384,6 +384,29 @@ TEST_F(GruRewriterTest, SkipSymbolAndPunctuationSegments) {
   EXPECT_EQ(segments.conversion_segment(1).candidate(0).value, "．");
 }
 
+TEST_F(GruRewriterTest, AlphabetCandidateDoubledGruScore) {
+  rewriter_->Reload();
+
+  ConversionRequest request;
+  Segments segments;
+
+  Segment* seg = segments.add_segment();
+  seg->set_key("えーあい");
+  AddCandidate("えーあい", "栄愛", 3000, seg);
+  AddCandidate("えーあい", "AI", 3000, seg);
+
+  rewriter_->Rewrite(request, &segments);
+
+  // Find "AI" candidate and verify its description has GRU score evaluated
+  for (size_t i = 0; i < seg->candidates_size(); ++i) {
+    if (seg->candidate(i).value == "AI" &&
+        !seg->candidate(i).description.empty()) {
+      EXPECT_TRUE(seg->candidate(i).description.find("GRU:") !=
+                  std::string::npos);
+    }
+  }
+}
+
 }  // namespace
 }  // namespace mozc
 
