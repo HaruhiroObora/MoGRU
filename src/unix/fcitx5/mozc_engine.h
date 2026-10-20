@@ -97,10 +97,17 @@ FCITX_CONFIGURATION(
     Option<Key> expand{this, "ExpandKey", _("Hotkey to expand usage"),
                        Key("Control+Alt+H")};
 
+    const std::string defaultGruModelPath_ = mozc::FileUtil::JoinPath(
+        mozc::SystemUtil::GetUserProfileDirectory(), "grumodel.bin");
+    const std::string defaultGruChardataPath_ = mozc::FileUtil::JoinPath(
+        mozc::SystemUtil::GetUserProfileDirectory(), "chardata.bin");
+
     Option<std::string> gruModelPath{
-        this, "GruModelPath", _("GRU Model Path (grumodel.bin)"), ""};
+        this, "GruModelPath", _("GRU Model Path (grumodel.bin)"),
+        defaultGruModelPath_};
     Option<std::string> gruChardataPath{
-        this, "GruChardataPath", _("CharIndex Data Path (chardata.bin)"), ""};
+        this, "GruChardataPath", _("CharIndex Data Path (chardata.bin)"),
+        defaultGruChardataPath_};
     Option<int, IntConstrain> gruScoreWeight{
         this, "GruScoreWeight", _("GRU Score Weight (Alpha)"), 800,
         IntConstrain(0, 100000)};

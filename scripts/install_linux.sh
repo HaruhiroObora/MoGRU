@@ -95,7 +95,41 @@ if [ -f "$REPO_ROOT/models/grumodel.bin" ] && [ -f "$REPO_ROOT/models/chardata.b
   cp -f "$REPO_ROOT/models/chardata.bin" "$HOME/.config/mozc/"
 fi
 
-# 6. Restart Fcitx5
+# 6. Configure default Fcitx5 settings for mozc-gru
+mkdir -p "$HOME/.config/fcitx5/conf"
+CONF_FILE="$HOME/.config/fcitx5/conf/mozc-gru.conf"
+DEFAULT_MODEL="$HOME/.config/mozc/grumodel.bin"
+DEFAULT_CHAR="$HOME/.config/mozc/chardata.bin"
+
+if [ ! -f "$CONF_FILE" ]; then
+  echo "[+] Generating initial Fcitx5 configuration for mozc-gru ..."
+  cat << EOF > "$CONF_FILE"
+# GRU Model Path (grumodel.bin)
+GruModelPath=$DEFAULT_MODEL
+# CharIndex Data Path (chardata.bin)
+GruChardataPath=$DEFAULT_CHAR
+# GRU Score Weight (Alpha)
+GruScoreWeight=800
+EOF
+else
+  # If GruModelPath or GruChardataPath is empty in existing config, fill with default values
+  if grep -q "^GruModelPath=$" "$CONF_FILE" || ! grep -q "^GruModelPath=" "$CONF_FILE"; then
+    echo "[+] Updating empty GruModelPath in $CONF_FILE ..."
+    sed -i "s|^GruModelPath=.*|GruModelPath=$DEFAULT_MODEL|" "$CONF_FILE" 2>/dev/null || true
+    if ! grep -q "^GruModelPath=" "$CONF_FILE"; then
+      echo "GruModelPath=$DEFAULT_MODEL" >> "$CONF_FILE"
+    fi
+  fi
+  if grep -q "^GruChardataPath=$" "$CONF_FILE" || ! grep -q "^GruChardataPath=" "$CONF_FILE"; then
+    echo "[+] Updating empty GruChardataPath in $CONF_FILE ..."
+    sed -i "s|^GruChardataPath=.*|GruChardataPath=$DEFAULT_CHAR|" "$CONF_FILE" 2>/dev/null || true
+    if ! grep -q "^GruChardataPath=" "$CONF_FILE"; then
+      echo "GruChardataPath=$DEFAULT_CHAR" >> "$CONF_FILE"
+    fi
+  fi
+fi
+
+# 7. Restart Fcitx5
 echo "=== Restarting Fcitx5 ==="
 if command -v fcitx5 &>/dev/null; then
   FCITX_ADDON_DIRS="$HOME/.local/lib/fcitx5:/usr/lib/x86_64-linux-gnu/fcitx5" fcitx5 -r -d || true

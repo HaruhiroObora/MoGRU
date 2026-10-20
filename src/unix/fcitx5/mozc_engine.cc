@@ -243,8 +243,18 @@ std::string MozcEngine::GetConfigPath() const {
 }
 
 void MozcEngine::SyncGruFlags() {
-  absl::SetFlag(&FLAGS_gru_model_path, config_.gruModelPath.value());
-  absl::SetFlag(&FLAGS_gru_chardata_path, config_.gruChardataPath.value());
+  std::string model_path = config_.gruModelPath.value();
+  if (model_path.empty()) {
+    model_path = mozc::FileUtil::JoinPath(
+        mozc::SystemUtil::GetUserProfileDirectory(), "grumodel.bin");
+  }
+  std::string chardata_path = config_.gruChardataPath.value();
+  if (chardata_path.empty()) {
+    chardata_path = mozc::FileUtil::JoinPath(
+        mozc::SystemUtil::GetUserProfileDirectory(), "chardata.bin");
+  }
+  absl::SetFlag(&FLAGS_gru_model_path, model_path);
+  absl::SetFlag(&FLAGS_gru_chardata_path, chardata_path);
   absl::SetFlag(&FLAGS_gru_score_weight,
                 static_cast<double>(config_.gruScoreWeight.value()));
 }
@@ -258,6 +268,20 @@ void MozcEngine::setConfig(const RawConfig& config) {
 
 void MozcEngine::reloadConfig() {
   readAsIni(config_, GetConfigPath());
+  bool modified = false;
+  if (config_.gruModelPath.value().empty()) {
+    config_.gruModelPath.setValue(mozc::FileUtil::JoinPath(
+        mozc::SystemUtil::GetUserProfileDirectory(), "grumodel.bin"));
+    modified = true;
+  }
+  if (config_.gruChardataPath.value().empty()) {
+    config_.gruChardataPath.setValue(mozc::FileUtil::JoinPath(
+        mozc::SystemUtil::GetUserProfileDirectory(), "chardata.bin"));
+    modified = true;
+  }
+  if (modified) {
+    safeSaveAsIni(config_, GetConfigPath());
+  }
   SyncGruFlags();
   ResetClientPool();
 }
