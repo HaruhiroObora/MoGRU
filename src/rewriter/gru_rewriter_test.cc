@@ -11,6 +11,7 @@
 #include "converter/attribute.h"
 #include "converter/candidate.h"
 #include "converter/segments.h"
+#include "protocol/commands.pb.h"
 #include "request/conversion_request.h"
 #include "testing/gunit.h"
 #include "testing/mozctest.h"
@@ -221,6 +222,60 @@ TEST_F(GruRewriterTest, InteractiveFocusRerank) {
   if (focus_handled) {
     EXPECT_EQ(segments.conversion_segments_size(), 2);
     EXPECT_TRUE(segments.conversion_segment(1).candidate(0).description.find("GRU:") !=
+                std::string::npos);
+  }
+}
+
+TEST_F(GruRewriterTest, HistoryPrefixContextCaching) {
+  absl::SetFlag(&FLAGS_gru_model_path, "");
+  absl::SetFlag(&FLAGS_gru_chardata_path, "");
+  rewriter_->Reload();
+
+  ConversionRequest request;
+  Segments segments;
+
+  // Add history segment
+  Segment* hist = segments.add_segment();
+  hist->set_segment_type(Segment::HISTORY);
+  Segment::Candidate* c = hist->add_candidate();
+  c->value = "今日は";
+  c->key = "きょうは";
+
+  // Add conversion segment
+  Segment* seg = segments.add_segment();
+  seg->set_key("よい");
+  AddCandidate("よい", "良い", 1000, seg);
+  AddCandidate("よい", "善い", 1000, seg);
+
+  EXPECT_EQ(segments.history_segments_size(), 1);
+  EXPECT_EQ(segments.history_value(), "今日は");
+  EXPECT_EQ(segments.conversion_segments_size(), 1);
+
+  const bool rewritten = rewriter_->Rewrite(request, &segments);
+  if (rewritten) {
+    EXPECT_TRUE(segments.conversion_segment(0).candidate(0).description.find("GRU:") !=
+                std::string::npos);
+  }
+}
+
+TEST_F(GruRewriterTest, SurroundingTextPrefixCaching) {
+  absl::SetFlag(&FLAGS_gru_model_path, "");
+  absl::SetFlag(&FLAGS_gru_chardata_path, "");
+  rewriter_->Reload();
+
+  commands::Context context;
+  context.set_preceding_text("最近の");
+  ConversionRequest request = ConversionRequestBuilder().SetContext(context).Build();
+
+  Segments segments;
+  Segment* seg = segments.add_segment();
+  seg->set_key("てんき");
+  AddCandidate("てんき", "天気", 1000, seg);
+  AddCandidate("てんき", "転機", 1000, seg);
+
+  const bool rewritten = rewriter_->Rewrite(request, &segments);
+  if (rewritten) {
+    EXPECT_TRUE(segments.conversion_segment(0).candidate(0).description.find("GRU:") !=
                 std::string::npos);
   }
 }

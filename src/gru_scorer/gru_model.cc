@@ -189,6 +189,139 @@ void GruModel::Step(uint16_t token_id,
     }
 }
 
+GruContext GruModel::ComputeContext(const charindex::CharIndex &indexer,
+                                    std::string_view prefix) const
+{
+    GruContext ctx;
+    if (!is_loaded_ || prefix.empty())
+    {
+        return ctx;
+    }
+
+    std::vector<uint16_t> token_ids;
+    token_ids.reserve(prefix.size());
+
+    std::string_view remaining = prefix;
+    while (!remaining.empty())
+    {
+        size_t bytes_consumed = 0;
+        char32_t cp = indexer.DecodeUtf8Char(remaining, bytes_consumed);
+        if (bytes_consumed == 0)
+        {
+            break;
+        }
+        token_ids.push_back(indexer.Char2Index(cp));
+        remaining.remove_prefix(bytes_consumed);
+    }
+
+    if (token_ids.empty())
+    {
+        return ctx;
+    }
+
+    const size_t H = hidden_size_;
+    std::vector<float> h_buf1(H, 0.0f);
+    std::vector<float> h_buf2(H, 0.0f);
+    float *h_curr = h_buf1.data();
+    float *h_next = h_buf2.data();
+
+    uint16_t prev_token = kBosTokenId;
+    for (size_t t = 0; t < token_ids.size(); ++t)
+    {
+        // Compute next hidden state without calculating log probabilities
+        Step(prev_token, (t == 0) ? nullptr : h_curr, h_next, nullptr);
+
+        uint16_t target_token = token_ids[t];
+        if (target_token >= vocab_size_) [[unlikely]]
+        {
+            target_token = kUnkTokenId;
+        }
+        prev_token = target_token;
+        std::swap(h_curr, h_next);
+    }
+
+    ctx.h.assign(h_curr, h_curr + H);
+    ctx.last_token = prev_token;
+    ctx.is_empty = false;
+    return ctx;
+}
+
+float GruModel::ScoreStringWithContext(const charindex::CharIndex &indexer,
+                                       std::string_view utf8_str,
+                                       const GruContext &context,
+                                       bool normalize) const
+{
+    if (!is_loaded_ || utf8_str.empty())
+    {
+        return 0.0f;
+    }
+
+    if (context.is_empty || context.h.empty())
+    {
+        return ScoreString(indexer, utf8_str, nullptr, normalize);
+    }
+
+    std::vector<uint16_t> token_ids;
+    token_ids.reserve(utf8_str.size());
+
+    std::string_view remaining = utf8_str;
+    while (!remaining.empty())
+    {
+        size_t bytes_consumed = 0;
+        char32_t cp = indexer.DecodeUtf8Char(remaining, bytes_consumed);
+        if (bytes_consumed == 0)
+        {
+            break;
+        }
+        token_ids.push_back(indexer.Char2Index(cp));
+        remaining.remove_prefix(bytes_consumed);
+    }
+
+    if (token_ids.empty())
+    {
+        return 0.0f;
+    }
+
+    const size_t H = hidden_size_;
+    std::vector<float> h_buf1(context.h);
+    std::vector<float> h_buf2(H, 0.0f);
+    float *h_curr = h_buf1.data();
+    float *h_next = h_buf2.data();
+
+    alignas(64) std::vector<float> log_probs(vocab_size_);
+    float total_log_prob = 0.0f;
+    uint16_t prev_token = context.last_token;
+
+    for (size_t t = 0; t < token_ids.size(); ++t)
+    {
+        Step(prev_token, h_curr, h_next, log_probs.data());
+
+        uint16_t target_token = token_ids[t];
+        if (target_token >= vocab_size_) [[unlikely]]
+        {
+            target_token = kUnkTokenId;
+        }
+
+        float token_log_prob = log_probs[target_token];
+        if (target_token == kUnkTokenId)
+        {
+            token_log_prob = std::min(token_log_prob, -6.0f) - 6.0f;
+        }
+
+        total_log_prob += token_log_prob;
+
+        prev_token = target_token;
+        std::swap(h_curr, h_next);
+    }
+
+    if (normalize)
+    {
+        return total_log_prob / static_cast<float>(token_ids.size());
+    }
+
+    return total_log_prob;
+}
+
 float GruModel::ScoreString(const charindex::CharIndex &indexer,
                             std::string_view utf8_str,
                             const float *initial_h,

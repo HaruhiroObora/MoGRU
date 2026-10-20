@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace charindex
 {
@@ -33,6 +34,16 @@ constexpr uint32_t kCurrentVersion = 1;
 constexpr uint32_t kDataTypeFp32 = 0;
 constexpr uint16_t kUnkTokenId = 0;
 constexpr uint16_t kBosTokenId = 1;
+
+/**
+ * @brief Context state (hidden state and last token) for prefix conditioning.
+ */
+struct GruContext
+{
+    std::vector<float> h;
+    uint16_t last_token = kBosTokenId;
+    bool is_empty = true;
+};
 
 class GruModel
 {
@@ -67,6 +78,32 @@ public:
               const float *h_prev,
               float *h_next,
               float *log_probs_out) const;
+
+    /**
+     * @brief Compute the final hidden state and last token ID for a prefix string.
+     *
+     * Iterates characters from <bos> without computing output log probabilities.
+     * Fast forward pass to obtain context for subsequent scoring.
+     */
+    GruContext ComputeContext(const charindex::CharIndex &indexer,
+                              std::string_view prefix) const;
+
+    /**
+     * @brief Score a UTF-8 string given a preceding GruContext.
+     *
+     * If context is empty, starts from <bos> and zeros hidden state (same as ScoreString).
+     * Otherwise, continues from context.h and context.last_token.
+     *
+     * @param indexer CharIndex instance to map characters to IDs
+     * @param utf8_str Input UTF-8 candidate string
+     * @param context Preceding GRU context (hidden state and last token)
+     * @param normalize If true, returns average log probability per character (total / token count).
+     * @return Sum of log probabilities (or average if normalize is true).
+     */
+    float ScoreStringWithContext(const charindex::CharIndex &indexer,
+                                 std::string_view utf8_str,
+                                 const GruContext &context,
+                                 bool normalize = false) const;
 
     /**
      * @brief Score a UTF-8 string by accumulating log P(c_t | c_{<t}).

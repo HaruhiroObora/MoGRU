@@ -174,6 +174,45 @@ void TestCharIndexIntegration()
     std::cout << "[Test] TestCharIndexIntegration passed!" << std::endl;
 }
 
+void TestGruContextCaching()
+{
+    std::cout << "[Test] Running TestGruContextCaching..." << std::endl;
+
+    charindex::CharIndex indexer;
+    std::string chardata_path = FindDataFile("chardata.bin");
+    bool loaded_char = indexer.LoadFile(chardata_path);
+    assert(loaded_char && "Failed to load chardata.bin");
+
+    gruscorer::GruModel model;
+    std::string model_path = FindDataFile("dummy_model.bin");
+    bool loaded_model = model.LoadModel(model_path);
+    assert(loaded_model && "Failed to load dummy_model.bin");
+
+    // 1. Empty prefix context
+    auto empty_ctx = model.ComputeContext(indexer, "");
+    assert(empty_ctx.is_empty);
+
+    // 2. Score with empty context should equal ScoreString without context
+    const std::string text = "今日は良い天気";
+    float score_full = model.ScoreString(indexer, text, nullptr, false);
+    float score_with_empty_ctx = model.ScoreStringWithContext(indexer, text, empty_ctx, false);
+    AssertNear(score_full, score_with_empty_ctx, 1e-5f, "Score with empty context");
+
+    // 3. Mathematical consistency of chain rule:
+    // log P(AB) = log P(A) + log P(B | A)
+    const std::string prefix = "今日は";
+    const std::string suffix = "良い天気";
+    float score_prefix = model.ScoreString(indexer, prefix, nullptr, false);
+    auto ctx = model.ComputeContext(indexer, prefix);
+    assert(!ctx.is_empty);
+    assert(ctx.h.size() == model.hidden_size());
+
+    float score_suffix = model.ScoreStringWithContext(indexer, suffix, ctx, false);
+    AssertNear(score_full, score_prefix + score_suffix, 1e-4f, "Chain rule log P(AB) == log P(A) + log P(B|A)");
+
+    std::cout << "[Test] TestGruContextCaching passed! Chain rule strictly holds." << std::endl;
+}
+
 void BenchmarkInference()
 {
     std::cout << "[Bench] Running BenchmarkInference..." << std::endl;
@@ -221,6 +260,7 @@ int main()
     TestMathOps();
     TestGruModelInference();
     TestCharIndexIntegration();
+    TestGruContextCaching();
     BenchmarkInference();
 
     std::cout << "========================================" << std::endl;

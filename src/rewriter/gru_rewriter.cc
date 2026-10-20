@@ -16,6 +16,7 @@
 #include "absl/strings/str_format.h"
 #include "base/file_util.h"
 #include "base/system_util.h"
+#include "base/util.h"
 #include "base/vlog.h"
 #include "converter/attribute.h"
 #include "converter/candidate.h"
@@ -113,6 +114,33 @@ std::string ResolveFilePath(const std::string& user_specified,
   }
 
   return "";
+}
+
+gruscorer::GruContext GetCachedPrefixContext(
+    const gruscorer::GruModel& model,
+    const charindex::CharIndex& indexer,
+    const ConversionRequest* request,
+    const Segments& segments) {
+  std::string prefix;
+  if (segments.history_segments_size() > 0) {
+    prefix = segments.history_value();
+  } else if (request != nullptr) {
+    prefix = request->GetSurroundingContext().first;
+  }
+
+  if (prefix.empty()) {
+    return gruscorer::GruContext();
+  }
+
+  // Trim prefix if too long to prevent latency issues (keep last 32 characters)
+  constexpr size_t kMaxPrefixChars = 32;
+  const size_t prefix_chars = Util::CharsLen(prefix);
+  if (prefix_chars > kMaxPrefixChars) {
+    prefix = std::string(Util::Utf8SubString(
+        prefix, prefix_chars - kMaxPrefixChars, kMaxPrefixChars));
+  }
+
+  return model.ComputeContext(indexer, prefix);
 }
 
 struct CandidateScore {
@@ -281,6 +309,10 @@ bool GruRewriter::Rewrite(const ConversionRequest& request,
     return false;
   }
 
+  // Cache hidden state h for the prefix context at the beginning of conversion.
+  const gruscorer::GruContext cached_context =
+      GetCachedPrefixContext(*model_, *indexer_, &request, *segments);
+
   const double alpha = absl::GetFlag(FLAGS_gru_score_weight);
   const bool show_score = absl::GetFlag(FLAGS_show_gru_score);
   const size_t num_segments = segments->conversion_segments_size();
@@ -292,7 +324,8 @@ bool GruRewriter::Rewrite(const ConversionRequest& request,
       if (seg->candidates_size() == 1 && show_score) {
         auto* cand = seg->mutable_candidate(0);
         const bool is_emoji = IsCandidateEmoji(*indexer_, *cand);
-        const float s = model_->ScoreString(*indexer_, cand->value, nullptr, true);
+        const float s = model_->ScoreStringWithContext(
+            *indexer_, cand->value, cached_context, true);
         UpdateCandidateDescription(cand, s, is_emoji, false);
       }
       return false;
@@ -307,7 +340,8 @@ bool GruRewriter::Rewrite(const ConversionRequest& request,
     for (size_t i = 0; i < num_eval; ++i) {
       const auto& cand = seg->candidate(i);
       const bool is_emoji = IsCandidateEmoji(*indexer_, cand);
-      const float gru_score = model_->ScoreString(*indexer_, cand.value, nullptr, true);
+      const float gru_score = model_->ScoreStringWithContext(
+          *indexer_, cand.value, cached_context, true);
 
       double combined_cost = static_cast<double>(cand.cost) - (alpha * gru_score);
       if (is_emoji) combined_cost += kEmojiPenalty;
@@ -353,7 +387,8 @@ bool GruRewriter::Rewrite(const ConversionRequest& request,
       if (cand.cost > top_cost + kMaxCostDiff) continue;
 
       const bool is_emoji = IsCandidateEmoji(*indexer_, cand);
-      const float score = model_->ScoreString(*indexer_, cand.value, nullptr, true);
+      const float score = model_->ScoreStringWithContext(
+          *indexer_, cand.value, cached_context, true);
       double eval = static_cast<double>(cand.cost) - (alpha * score);
       if (is_emoji) eval += kEmojiPenalty;
 
@@ -383,7 +418,8 @@ bool GruRewriter::Rewrite(const ConversionRequest& request,
 
         const bool is_emoji = path.has_emoji || IsCandidateEmoji(*indexer_, cand);
         const std::string new_text = path.text + cand.value;
-        const float new_score = model_->ScoreString(*indexer_, new_text, nullptr, true);
+        const float new_score = model_->ScoreStringWithContext(
+            *indexer_, new_text, cached_context, true);
         const int32_t new_viterbi = path.total_viterbi_cost + cand.cost;
 
         double eval = static_cast<double>(new_viterbi) - (alpha * new_score);
@@ -429,7 +465,8 @@ bool GruRewriter::Rewrite(const ConversionRequest& request,
     for (size_t j = 0; j < num_eval; ++j) {
       const auto& cand = seg->candidate(j);
       const bool is_emoji = IsCandidateEmoji(*indexer_, cand);
-      const float score = model_->ScoreString(*indexer_, prefix + cand.value, nullptr, true);
+      const float score = model_->ScoreStringWithContext(
+          *indexer_, prefix + cand.value, cached_context, true);
 
       double eval = static_cast<double>(cand.cost) - (alpha * score);
       if (is_emoji) eval += kEmojiPenalty;
@@ -499,6 +536,10 @@ bool GruRewriter::Focus(Segments* segments, size_t segment_index,
   }
   prefix += focused_value;
 
+  // Cache hidden state h for the history prefix context.
+  const gruscorer::GruContext cached_context =
+      GetCachedPrefixContext(*model_, *indexer_, nullptr, *segments);
+
   const double alpha = absl::GetFlag(FLAGS_gru_score_weight);
   const bool show_score = absl::GetFlag(FLAGS_show_gru_score);
   const size_t remaining_segments = num_conv_segments - (conv_seg_index + 1);
@@ -517,7 +558,8 @@ bool GruRewriter::Focus(Segments* segments, size_t segment_index,
     for (size_t j = 0; j < num_eval; ++j) {
       const auto& cand = next_seg->candidate(j);
       const bool is_emoji = IsCandidateEmoji(*indexer_, cand);
-      const float score = model_->ScoreString(*indexer_, prefix + cand.value, nullptr, true);
+      const float score = model_->ScoreStringWithContext(
+          *indexer_, prefix + cand.value, cached_context, true);
 
       double eval = static_cast<double>(cand.cost) - (alpha * score);
       if (is_emoji) eval += kEmojiPenalty;
@@ -564,7 +606,8 @@ bool GruRewriter::Focus(Segments* segments, size_t segment_index,
 
         const bool is_emoji = IsCandidateEmoji(*indexer_, cand);
         const std::string text = prefix + cand.value;
-        const float score = model_->ScoreString(*indexer_, text, nullptr, true);
+        const float score = model_->ScoreStringWithContext(
+            *indexer_, text, cached_context, true);
         double eval = static_cast<double>(cand.cost) - (alpha * score);
         if (is_emoji) eval += kEmojiPenalty;
 
@@ -592,7 +635,8 @@ bool GruRewriter::Focus(Segments* segments, size_t segment_index,
 
             const bool is_emoji = path.has_emoji || IsCandidateEmoji(*indexer_, cand);
             const std::string new_text = path.text + cand.value;
-            const float new_score = model_->ScoreString(*indexer_, new_text, nullptr, true);
+            const float new_score = model_->ScoreStringWithContext(
+                *indexer_, new_text, cached_context, true);
             const int32_t new_viterbi = path.total_viterbi_cost + cand.cost;
 
             double eval = static_cast<double>(new_viterbi) - (alpha * new_score);
@@ -635,7 +679,8 @@ bool GruRewriter::Focus(Segments* segments, size_t segment_index,
         for (size_t j = 0; j < num_eval; ++j) {
           const auto& cand = seg->candidate(j);
           const bool is_emoji = IsCandidateEmoji(*indexer_, cand);
-          const float score = model_->ScoreString(*indexer_, sub_prefix + cand.value, nullptr, true);
+          const float score = model_->ScoreStringWithContext(
+              *indexer_, sub_prefix + cand.value, cached_context, true);
 
           double eval = static_cast<double>(cand.cost) - (alpha * score);
           if (is_emoji) eval += kEmojiPenalty;
