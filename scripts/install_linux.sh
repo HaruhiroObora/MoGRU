@@ -10,92 +10,131 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 echo "=== MoGRU (Fcitx5) Installer for Linux ==="
 echo "Repository Root: $REPO_ROOT"
 
-# 1. Check Bazel / Bazelisk
-export USE_BAZEL_VERSION="${USE_BAZEL_VERSION:-9.0.2}"
-BAZEL_BIN=""
-if command -v bazelisk &>/dev/null; then
-  BAZEL_BIN="bazelisk"
-elif command -v bazel &>/dev/null; then
-  BAZEL_BIN="bazel"
+PREBUILT_SO=""
+if [ $# -ge 1 ]; then
+  if [ "$1" = "--binary" ] && [ $# -ge 2 ]; then
+    PREBUILT_SO="$2"
+  elif [ -f "$1" ]; then
+    PREBUILT_SO="$1"
+  fi
+fi
+
+if [ -n "$PREBUILT_SO" ]; then
+  if [ ! -f "$PREBUILT_SO" ]; then
+    echo "[!] Prebuilt binary not found: $PREBUILT_SO"
+    exit 1
+  fi
+  PREBUILT_SO="$(cd "$(dirname "$PREBUILT_SO")" && pwd)/$(basename "$PREBUILT_SO")"
+  echo "[+] Using prebuilt binary from CI/Release: $PREBUILT_SO"
+  echo "    Skipping Bazel build step."
 else
-  echo "[!] Bazel or Bazelisk was not found."
-  echo "    Attempting to download Bazelisk to ~/.local/bin/bazel ..."
-  mkdir -p "$HOME/.local/bin"
-  curl -fsSL -o "$HOME/.local/bin/bazel" \
-    https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
-  chmod +x "$HOME/.local/bin/bazel"
-  export PATH="$HOME/.local/bin:$PATH"
-  BAZEL_BIN="$HOME/.local/bin/bazel"
-fi
-echo "[+] Using Bazel: $("$BAZEL_BIN" --version 2>/dev/null || echo "$BAZEL_BIN")"
-
-# 2. Check Fcitx5 development headers
-if command -v apt-get &>/dev/null; then
-  MISSING_PKGS=()
-  for pkg in fcitx5 libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev fcitx5-modules-dev pkg-config; do
-    if ! dpkg -s "$pkg" &>/dev/null; then
-      MISSING_PKGS+=("$pkg")
-    fi
-  done
-  if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
-    echo "[!] Missing required packages: ${MISSING_PKGS[*]}"
-    echo "    Please install them with: sudo apt install -y ${MISSING_PKGS[*]}"
-    read -rp "Run sudo apt install now? [y/N]: " ans
-    if [[ "$ans" =~ ^[Yy]$ ]]; then
-      sudo apt update && sudo apt install -y "${MISSING_PKGS[@]}"
-    fi
+  # 1. Check Bazel / Bazelisk
+  export USE_BAZEL_VERSION="${USE_BAZEL_VERSION:-9.0.2}"
+  BAZEL_BIN=""
+  if command -v bazelisk &>/dev/null; then
+    BAZEL_BIN="bazelisk"
+  elif command -v bazel &>/dev/null; then
+    BAZEL_BIN="bazel"
+  else
+    echo "[!] Bazel or Bazelisk was not found."
+    echo "    Attempting to download Bazelisk to ~/.local/bin/bazel ..."
+    mkdir -p "$HOME/.local/bin"
+    curl -fsSL -o "$HOME/.local/bin/bazel" \
+      https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
+    chmod +x "$HOME/.local/bin/bazel"
+    export PATH="$HOME/.local/bin:$PATH"
+    BAZEL_BIN="$HOME/.local/bin/bazel"
   fi
-elif command -v dnf &>/dev/null; then
-  MISSING_PKGS=()
-  for pkg in fcitx5 fcitx5-devel pkgconf-pkg-config gcc-c++; do
-    if ! rpm -q "$pkg" &>/dev/null; then
-      MISSING_PKGS+=("$pkg")
-    fi
-  done
-  if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
-    echo "[!] Missing required RedHat/Fedora packages: ${MISSING_PKGS[*]}"
-    echo "    Please install them with: sudo dnf install -y ${MISSING_PKGS[*]}"
-    read -rp "Run sudo dnf install now? [y/N]: " ans
-    if [[ "$ans" =~ ^[Yy]$ ]]; then
-      sudo dnf install -y "${MISSING_PKGS[@]}"
-    fi
-  fi
-elif command -v yum &>/dev/null; then
-  MISSING_PKGS=()
-  for pkg in fcitx5 fcitx5-devel pkgconf-pkg-config gcc-c++; do
-    if ! rpm -q "$pkg" &>/dev/null; then
-      MISSING_PKGS+=("$pkg")
-    fi
-  done
-  if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
-    echo "[!] Missing required RedHat/CentOS packages: ${MISSING_PKGS[*]}"
-    echo "    Please install them with: sudo yum install -y ${MISSING_PKGS[*]}"
-    read -rp "Run sudo yum install now? [y/N]: " ans
-    if [[ "$ans" =~ ^[Yy]$ ]]; then
-      sudo yum install -y "${MISSING_PKGS[@]}"
-    fi
-  fi
-elif command -v pacman &>/dev/null; then
-  MISSING_PKGS=()
-  for pkg in fcitx5 fcitx5-im base-devel; do
-    if ! pacman -Q "$pkg" &>/dev/null; then
-      MISSING_PKGS+=("$pkg")
-    fi
-  done
-  if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
-    echo "[!] Missing required Arch packages: ${MISSING_PKGS[*]}"
-    echo "    Please install them with: sudo pacman -S --needed ${MISSING_PKGS[*]}"
-    read -rp "Run sudo pacman -S now? [y/N]: " ans
-    if [[ "$ans" =~ ^[Yy]$ ]]; then
-      sudo pacman -S --needed "${MISSING_PKGS[@]}"
-    fi
-  fi
+  echo "[+] Using Bazel: $("$BAZEL_BIN" --version 2>/dev/null || echo "$BAZEL_BIN")"
 fi
 
-# 3. Build fcitx5-mogru.so
-echo "=== Building fcitx5-mogru.so (-c opt) ==="
-cd "$REPO_ROOT/src"
-"$BAZEL_BIN" build -c opt //unix/fcitx5:fcitx5-mogru.so --//unix/fcitx5:use_server=False
+# 2. Check Fcitx5 development headers / runtime packages
+if [ -z "$PREBUILT_SO" ]; then
+  if command -v apt-get &>/dev/null; then
+    MISSING_PKGS=()
+    for pkg in fcitx5 libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev fcitx5-modules-dev pkg-config; do
+      if ! dpkg -s "$pkg" &>/dev/null; then
+        MISSING_PKGS+=("$pkg")
+      fi
+    done
+    if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
+      echo "[!] Missing required packages: ${MISSING_PKGS[*]}"
+      echo "    Please install them with: sudo apt install -y ${MISSING_PKGS[*]}"
+      read -rp "Run sudo apt install now? [y/N]: " ans
+      if [[ "$ans" =~ ^[Yy]$ ]]; then
+        sudo apt update && sudo apt install -y "${MISSING_PKGS[@]}"
+      fi
+    fi
+  elif command -v dnf &>/dev/null; then
+    MISSING_PKGS=()
+    for pkg in fcitx5 fcitx5-devel pkgconf-pkg-config gcc-c++; do
+      if ! rpm -q "$pkg" &>/dev/null; then
+        MISSING_PKGS+=("$pkg")
+      fi
+    done
+    if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
+      echo "[!] Missing required RedHat/Fedora packages: ${MISSING_PKGS[*]}"
+      echo "    Please install them with: sudo dnf install -y ${MISSING_PKGS[*]}"
+      read -rp "Run sudo dnf install now? [y/N]: " ans
+      if [[ "$ans" =~ ^[Yy]$ ]]; then
+        sudo dnf install -y "${MISSING_PKGS[@]}"
+      fi
+    fi
+  elif command -v yum &>/dev/null; then
+    MISSING_PKGS=()
+    for pkg in fcitx5 fcitx5-devel pkgconf-pkg-config gcc-c++; do
+      if ! rpm -q "$pkg" &>/dev/null; then
+        MISSING_PKGS+=("$pkg")
+      fi
+    done
+    if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
+      echo "[!] Missing required RedHat/CentOS packages: ${MISSING_PKGS[*]}"
+      echo "    Please install them with: sudo yum install -y ${MISSING_PKGS[*]}"
+      read -rp "Run sudo yum install now? [y/N]: " ans
+      if [[ "$ans" =~ ^[Yy]$ ]]; then
+        sudo yum install -y "${MISSING_PKGS[@]}"
+      fi
+    fi
+  elif command -v pacman &>/dev/null; then
+    MISSING_PKGS=()
+    for pkg in fcitx5 fcitx5-im base-devel; do
+      if ! pacman -Q "$pkg" &>/dev/null; then
+        MISSING_PKGS+=("$pkg")
+      fi
+    done
+    if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
+      echo "[!] Missing required Arch packages: ${MISSING_PKGS[*]}"
+      echo "    Please install them with: sudo pacman -S --needed ${MISSING_PKGS[*]}"
+      read -rp "Run sudo pacman -S now? [y/N]: " ans
+      if [[ "$ans" =~ ^[Yy]$ ]]; then
+        sudo pacman -S --needed "${MISSING_PKGS[@]}"
+      fi
+    fi
+  fi
+else
+  # Prebuilt binary only requires fcitx5 runtime
+  if ! command -v fcitx5 &>/dev/null; then
+    echo "[!] fcitx5 runtime not found."
+    if command -v apt-get &>/dev/null; then
+      echo "    Please install Fcitx5 with: sudo apt install -y fcitx5"
+    elif command -v dnf &>/dev/null; then
+      echo "    Please install Fcitx5 with: sudo dnf install -y fcitx5"
+    elif command -v pacman &>/dev/null; then
+      echo "    Please install Fcitx5 with: sudo pacman -S fcitx5 fcitx5-im"
+    fi
+  fi
+fi
+
+# 3. Build or resolve fcitx5-mogru.so
+SOURCE_SO=""
+if [ -z "$PREBUILT_SO" ]; then
+  echo "=== Building fcitx5-mogru.so (-c opt) ==="
+  cd "$REPO_ROOT/src"
+  "$BAZEL_BIN" build -c opt //unix/fcitx5:fcitx5-mogru.so --//unix/fcitx5:use_server=False
+  SOURCE_SO="$REPO_ROOT/src/bazel-bin/unix/fcitx5/fcitx5-mogru.so"
+else
+  SOURCE_SO="$PREBUILT_SO"
+fi
 
 # 4. Install plugin and addon definitions
 echo "=== Installing MoGRU to ~/.local ==="
@@ -114,8 +153,8 @@ rm -f "$HOME/.local/share/fcitx5/inputmethod/mozc-gru.conf"
 # Copy library (install to both lib and lib64 for multi-distro compatibility)
 rm -f "$HOME/.local/lib/fcitx5/fcitx5-mogru.so"
 rm -f "$HOME/.local/lib64/fcitx5/fcitx5-mogru.so"
-cp -f "$REPO_ROOT/src/bazel-bin/unix/fcitx5/fcitx5-mogru.so" "$HOME/.local/lib/fcitx5/"
-cp -f "$REPO_ROOT/src/bazel-bin/unix/fcitx5/fcitx5-mogru.so" "$HOME/.local/lib64/fcitx5/"
+cp -f "$SOURCE_SO" "$HOME/.local/lib/fcitx5/fcitx5-mogru.so"
+cp -f "$SOURCE_SO" "$HOME/.local/lib64/fcitx5/fcitx5-mogru.so"
 chmod 755 "$HOME/.local/lib/fcitx5/fcitx5-mogru.so" "$HOME/.local/lib64/fcitx5/fcitx5-mogru.so"
 
 # Create / copy addon conf
