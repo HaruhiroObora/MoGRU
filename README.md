@@ -39,6 +39,12 @@ cd MoGRU
 ./install.sh
 # または: ./scripts/install_linux.sh
 ```
+> [!TIP]
+> **CIビルド生成物（Artifacts）を利用する場合（Bazel不要・数秒で完了）**:
+> GitHub Actions の `CI for Linux` の実行画面（Artifacts）から `fcitx5-mogru.so` をダウンロード・展開し、引数に指定して実行できます：
+> ```bash
+> ./install.sh /path/to/fcitx5-mogru.so
+> ```
 
 ### 🍎 macOS
 ```bash
