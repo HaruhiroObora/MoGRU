@@ -32,6 +32,9 @@
 namespace fcitx {
 class MozcEngineFactory : public AddonFactory {
  public:
+  explicit MozcEngineFactory(std::string addonName = "mogru")
+      : addonName_(std::move(addonName)) {}
+
   AddonInstance* create(AddonManager* manager) override {
     // We don't have a direct way to detect, so we simply try.
     auto baseDirectory = makeUniqueCPtr(
@@ -61,7 +64,7 @@ class MozcEngineFactory : public AddonFactory {
       }
       numberOfSlash -= 1;
     }
-    return new MozcEngine(manager->instance());
+    return new MozcEngine(manager->instance(), addonName_);
   }
 
  private:
@@ -69,16 +72,26 @@ class MozcEngineFactory : public AddonFactory {
     return makeUniqueCPtr(
         realpath(stringutils::joinPath(path, "..").data(), nullptr));
   }
+  std::string addonName_;
 };
+
+static MozcEngineFactory mogruFactory("mogru");
+static MozcEngineFactory mozcGruFactory("mozc-gru");
+static MozcEngineFactory mozcFactory("mozc");
+
 }  // namespace fcitx
 
-#ifdef FCITX_ADDON_FACTORY_V2_BACKWARDS
-FCITX_ADDON_FACTORY_V2_BACKWARDS(mozc_gru, fcitx::MozcEngineFactory)
-FCITX_ADDON_FACTORY_V2(mozc, fcitx::MozcEngineFactory)
-#elif defined(FCITX_ADDON_FACTORY_V2)
-FCITX_ADDON_FACTORY_V2(mozc_gru, fcitx::MozcEngineFactory)
-FCITX_ADDON_FACTORY_V2(mozc, fcitx::MozcEngineFactory)
-FCITX_ADDON_FACTORY(fcitx::MozcEngineFactory)
-#else
-FCITX_ADDON_FACTORY(fcitx::MozcEngineFactory)
-#endif
+extern "C" {
+FCITX_ADDON_EXPORT ::fcitx::AddonFactory* fcitx_addon_factory_instance_mogru() {
+  return &fcitx::mogruFactory;
+}
+FCITX_ADDON_EXPORT ::fcitx::AddonFactory* fcitx_addon_factory_instance_mozc_gru() {
+  return &fcitx::mozcGruFactory;
+}
+FCITX_ADDON_EXPORT ::fcitx::AddonFactory* fcitx_addon_factory_instance_mozc() {
+  return &fcitx::mozcFactory;
+}
+FCITX_ADDON_EXPORT ::fcitx::AddonFactory* fcitx_addon_factory_instance() {
+  return &fcitx::mogruFactory;
+}
+}

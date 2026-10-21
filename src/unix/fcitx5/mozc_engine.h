@@ -146,7 +146,7 @@ class MozcModeSubAction : public SimpleAction {
 
 class MozcEngine final : public InputMethodEngineV2 {
  public:
-  MozcEngine(Instance* instance);
+  MozcEngine(Instance* instance, std::string addonName = "");
   ~MozcEngine();
   Instance* instance() { return instance_; }
   void activate(const InputMethodEntry& entry,
@@ -199,6 +199,7 @@ class MozcEngine final : public InputMethodEngineV2 {
   SimpleAction separatorAction_;
   Menu toolMenu_;
   MozcEngineConfig config_;
+  std::string addonName_;
   bool deactivating_ = false;
 
   FCITX_ADDON_DEPENDENCY_LOADER(clipboard, instance_->addonManager());

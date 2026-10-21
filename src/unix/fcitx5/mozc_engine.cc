@@ -146,11 +146,12 @@ Instance* Init(Instance* instance) {
   return instance;
 }
 
-MozcEngine::MozcEngine(Instance* instance)
+MozcEngine::MozcEngine(Instance* instance, std::string addonName)
     : instance_(Init(instance)),
       parser_(std::make_unique<MozcResponseParser>(this)),
       client_(createClient()),
-      factory_([this](InputContext& ic) { return new MozcState(&ic, this); }) {
+      factory_([this](InputContext& ic) { return new MozcState(&ic, this); }),
+      addonName_(std::move(addonName)) {
   pool_ = std::make_unique<MozcClientPool>(GetSharedStatePolicy());
   for (auto command :
        {mozc::commands::DIRECT, mozc::commands::HIRAGANA,
@@ -228,7 +229,7 @@ MozcEngine::MozcEngine(Instance* instance)
   globalConfigReloadHandle_ =
       instance_->watchEvent(EventType::GlobalConfigReloaded,
                             EventWatcherPhase::Default, [this](Event&) {
-                              ResetClientPool();
+                              reloadConfig();
                               return true;
                             });
 
@@ -238,10 +239,33 @@ MozcEngine::MozcEngine(Instance* instance)
 MozcEngine::~MozcEngine() {}
  
 std::string MozcEngine::GetConfigPath() const {
+  std::string name;
   if (addonInfo()) {
-    return "conf/" + addonInfo()->uniqueName() + ".conf";
+    name = addonInfo()->uniqueName();
+  } else if (!addonName_.empty()) {
+    name = addonName_;
+  } else {
+    name = "mogru";
   }
-  return "conf/mozc.conf";
+
+  const std::string preferred_path = "conf/" + name + ".conf";
+  const char* home = std::getenv("HOME");
+  if (home != nullptr) {
+    const std::string full_path =
+        mozc::FileUtil::JoinPath(home, ".config/fcitx5/" + preferred_path);
+    if (mozc::FileUtil::FileExists(full_path).ok()) {
+      return preferred_path;
+    }
+    // Fallback: check if old mozc-gru.conf exists when running as mogru
+    if (name == "mogru") {
+      const std::string old_path =
+          mozc::FileUtil::JoinPath(home, ".config/fcitx5/conf/mozc-gru.conf");
+      if (mozc::FileUtil::FileExists(old_path).ok()) {
+        return "conf/mozc-gru.conf";
+      }
+    }
+  }
+  return preferred_path;
 }
 
 void MozcEngine::SyncGruFlags() {
