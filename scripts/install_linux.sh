@@ -32,7 +32,7 @@ echo "[+] Using Bazel: $("$BAZEL_BIN" --version 2>/dev/null || echo "$BAZEL_BIN"
 # 2. Check Fcitx5 development headers
 if command -v apt-get &>/dev/null; then
   MISSING_PKGS=()
-  for pkg in fcitx5 libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev fcitx5-modules-dev; do
+  for pkg in fcitx5 libfcitx5core-dev libfcitx5config-dev libfcitx5utils-dev fcitx5-modules-dev pkg-config; do
     if ! dpkg -s "$pkg" &>/dev/null; then
       MISSING_PKGS+=("$pkg")
     fi
@@ -45,6 +45,51 @@ if command -v apt-get &>/dev/null; then
       sudo apt update && sudo apt install -y "${MISSING_PKGS[@]}"
     fi
   fi
+elif command -v dnf &>/dev/null; then
+  MISSING_PKGS=()
+  for pkg in fcitx5 fcitx5-devel pkgconf-pkg-config gcc-c++; do
+    if ! rpm -q "$pkg" &>/dev/null; then
+      MISSING_PKGS+=("$pkg")
+    fi
+  done
+  if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
+    echo "[!] Missing required RedHat/Fedora packages: ${MISSING_PKGS[*]}"
+    echo "    Please install them with: sudo dnf install -y ${MISSING_PKGS[*]}"
+    read -rp "Run sudo dnf install now? [y/N]: " ans
+    if [[ "$ans" =~ ^[Yy]$ ]]; then
+      sudo dnf install -y "${MISSING_PKGS[@]}"
+    fi
+  fi
+elif command -v yum &>/dev/null; then
+  MISSING_PKGS=()
+  for pkg in fcitx5 fcitx5-devel pkgconf-pkg-config gcc-c++; do
+    if ! rpm -q "$pkg" &>/dev/null; then
+      MISSING_PKGS+=("$pkg")
+    fi
+  done
+  if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
+    echo "[!] Missing required RedHat/CentOS packages: ${MISSING_PKGS[*]}"
+    echo "    Please install them with: sudo yum install -y ${MISSING_PKGS[*]}"
+    read -rp "Run sudo yum install now? [y/N]: " ans
+    if [[ "$ans" =~ ^[Yy]$ ]]; then
+      sudo yum install -y "${MISSING_PKGS[@]}"
+    fi
+  fi
+elif command -v pacman &>/dev/null; then
+  MISSING_PKGS=()
+  for pkg in fcitx5 fcitx5-im base-devel; do
+    if ! pacman -Q "$pkg" &>/dev/null; then
+      MISSING_PKGS+=("$pkg")
+    fi
+  done
+  if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
+    echo "[!] Missing required Arch packages: ${MISSING_PKGS[*]}"
+    echo "    Please install them with: sudo pacman -S --needed ${MISSING_PKGS[*]}"
+    read -rp "Run sudo pacman -S now? [y/N]: " ans
+    if [[ "$ans" =~ ^[Yy]$ ]]; then
+      sudo pacman -S --needed "${MISSING_PKGS[@]}"
+    fi
+  fi
 fi
 
 # 3. Build fcitx5-mogru.so
@@ -55,19 +100,23 @@ cd "$REPO_ROOT/src"
 # 4. Install plugin and addon definitions
 echo "=== Installing MoGRU to ~/.local ==="
 mkdir -p "$HOME/.local/lib/fcitx5"
+mkdir -p "$HOME/.local/lib64/fcitx5"
 mkdir -p "$HOME/.local/share/fcitx5/addon"
 mkdir -p "$HOME/.local/share/fcitx5/inputmethod"
 mkdir -p "$HOME/.config/mozc"
 
 # Clean up older mozc-gru references to prevent duplicates
 rm -f "$HOME/.local/lib/fcitx5/fcitx5-mozc-gru.so"
+rm -f "$HOME/.local/lib64/fcitx5/fcitx5-mozc-gru.so"
 rm -f "$HOME/.local/share/fcitx5/addon/mozc-gru.conf"
 rm -f "$HOME/.local/share/fcitx5/inputmethod/mozc-gru.conf"
 
-# Copy library
+# Copy library (install to both lib and lib64 for multi-distro compatibility)
 rm -f "$HOME/.local/lib/fcitx5/fcitx5-mogru.so"
+rm -f "$HOME/.local/lib64/fcitx5/fcitx5-mogru.so"
 cp -f "$REPO_ROOT/src/bazel-bin/unix/fcitx5/fcitx5-mogru.so" "$HOME/.local/lib/fcitx5/"
-chmod 755 "$HOME/.local/lib/fcitx5/fcitx5-mogru.so"
+cp -f "$REPO_ROOT/src/bazel-bin/unix/fcitx5/fcitx5-mogru.so" "$HOME/.local/lib64/fcitx5/"
+chmod 755 "$HOME/.local/lib/fcitx5/fcitx5-mogru.so" "$HOME/.local/lib64/fcitx5/fcitx5-mogru.so"
 
 # Create / copy addon conf
 cat << 'EOF' > "$HOME/.local/share/fcitx5/addon/mogru.conf"
@@ -158,7 +207,8 @@ fi
 # 7. Restart Fcitx5
 echo "=== Restarting Fcitx5 ==="
 if command -v fcitx5 &>/dev/null; then
-  FCITX_ADDON_DIRS="$HOME/.local/lib/fcitx5:/usr/lib/x86_64-linux-gnu/fcitx5" fcitx5 -r -d >/dev/null 2>&1 </dev/null || true
+  # Include standard Debian/Ubuntu, RedHat/Fedora/openSUSE, and Arch addon locations
+  FCITX_ADDON_DIRS="$HOME/.local/lib/fcitx5:$HOME/.local/lib64/fcitx5:/usr/lib64/fcitx5:/usr/lib/x86_64-linux-gnu/fcitx5:/usr/lib/fcitx5" fcitx5 -r -d >/dev/null 2>&1 </dev/null || true
   echo "[+] Fcitx5 restarted successfully."
 else
   echo "[!] fcitx5 command not found in PATH. Please restart Fcitx5 manually."
