@@ -65,6 +65,45 @@ void TestMathOps()
     float sum_p = std::exp(log_probs[0]) + std::exp(log_probs[1]) + std::exp(log_probs[2]);
     AssertNear(sum_p, 1.0f, 1e-5f, "LogSoftmax sum exp");
 
+    // 5. Numerical consistency check: Scalar vs AVX2+FMA
+#if defined(__x86_64__) || defined(_M_X64)
+    if (gruscorer::math::HasAvx2Fma())
+    {
+        constexpr size_t kRows = 257;
+        constexpr size_t kCols = 135;
+        std::vector<float> big_W(kRows * kCols);
+        std::vector<float> big_x(kCols);
+        std::vector<float> big_b(kRows);
+        std::vector<float> y_scalar(kRows);
+        std::vector<float> y_avx2(kRows);
+
+        for (size_t i = 0; i < big_W.size(); ++i)
+        {
+            big_W[i] = std::sin(static_cast<float>(i + 1) * 0.01f);
+        }
+        for (size_t i = 0; i < big_x.size(); ++i)
+        {
+            big_x[i] = std::cos(static_cast<float>(i + 1) * 0.02f);
+        }
+        for (size_t i = 0; i < big_b.size(); ++i)
+        {
+            big_b[i] = 0.1f * static_cast<float>(i % 10);
+        }
+
+        gruscorer::math::GemvScalar(big_W.data(), big_x.data(), big_b.data(), y_scalar.data(), kRows, kCols);
+        gruscorer::math::GemvAvx2Fma(big_W.data(), big_x.data(), big_b.data(), y_avx2.data(), kRows, kCols);
+
+        for (size_t r = 0; r < kRows; ++r)
+        {
+            AssertNear(y_avx2[r], y_scalar[r], 1e-4f, "Gemv AVX2 vs Scalar row " + std::to_string(r));
+        }
+
+        float lse_scalar = gruscorer::math::ComputeLogSumExpScalar(y_scalar.data(), kRows);
+        float lse_avx2 = gruscorer::math::ComputeLogSumExpAvx2(y_scalar.data(), kRows);
+        AssertNear(lse_avx2, lse_scalar, 1e-4f, "LogSumExp AVX2 vs Scalar");
+    }
+#endif
+
     std::cout << "[Test] TestMathOps passed." << std::endl;
 }
 
@@ -99,7 +138,8 @@ void TestGruModelInference()
 
     gruscorer::GruModel model;
     std::string path = FindDataFile("dummy_model.bin");
-    bool loaded = model.LoadModel(path);
+    const bool loaded = model.LoadModel(path);
+    (void)loaded;
     assert(loaded && "Failed to load dummy_model.bin");
     assert(model.is_loaded());
     assert(model.vocab_size() == 4096);
@@ -115,33 +155,40 @@ void TestGruModelInference()
     model.Step(1, nullptr, h1.data(), log_probs1.data());
 
     // Verify against Python NumPy reference values
-    // Reference from test_reference.json:
-    // step1_h_first5: [-0.0016254, -0.0108784, -0.0149002, -0.0085681, 0.0171886]
     AssertNear(h1[0], -0.001625417f, 1e-5f, "Step1 h1[0]");
     AssertNear(h1[1], -0.010878378f, 1e-5f, "Step1 h1[1]");
     AssertNear(h1[2], -0.014900248f, 1e-5f, "Step1 h1[2]");
     AssertNear(h1[3], -0.008568134f, 1e-5f, "Step1 h1[3]");
     AssertNear(h1[4],  0.017188603f, 1e-5f, "Step1 h1[4]");
 
-    // step1_log_probs_first5: [-8.31353, -8.32913, -8.33520, -8.28489, -8.32827]
     AssertNear(log_probs1[0], -8.313534f, 1e-4f, "Step1 log_probs[0]");
     AssertNear(log_probs1[1], -8.329125f, 1e-4f, "Step1 log_probs[1]");
     AssertNear(log_probs1[2], -8.335196f, 1e-4f, "Step1 log_probs[2]");
     AssertNear(log_probs1[100], -8.157008f, 1e-4f, "Step1 log_probs[100]");
+
+    // Verify StepWithTargetLogProb matches Step log_probs output exactly
+    std::vector<float> h1_fast(H, 0.0f);
+    for (uint16_t test_tok : {0, 1, 2, 50, 100, 500, 4000})
+    {
+        float target_lp = model.StepWithTargetLogProb(1, nullptr, h1_fast.data(), test_tok);
+        AssertNear(target_lp, log_probs1[test_tok], 1e-4f, "StepWithTargetLogProb token " + std::to_string(test_tok));
+        for (size_t j = 0; j < H; ++j)
+        {
+            AssertNear(h1_fast[j], h1[j], 1e-5f, "StepWithTargetLogProb h state");
+        }
+    }
 
     // Step 2: token 100, h_prev = h1
     std::vector<float> h2(H, 0.0f);
     std::vector<float> log_probs2(V, 0.0f);
     model.Step(100, h1.data(), h2.data(), log_probs2.data());
 
-    // step2_h_first5: [-0.0144437, -0.0242451, 0.0003230, -0.0074516, 0.0456815]
     AssertNear(h2[0], -0.014443655f, 1e-5f, "Step2 h2[0]");
     AssertNear(h2[1], -0.024245083f, 1e-5f, "Step2 h2[1]");
     AssertNear(h2[2],  0.000322970f, 1e-5f, "Step2 h2[2]");
     AssertNear(h2[3], -0.007451564f, 1e-5f, "Step2 h2[3]");
     AssertNear(h2[4],  0.045681491f, 1e-5f, "Step2 h2[4]");
 
-    // step2_target_200_log_prob: -8.254036
     AssertNear(log_probs2[200], -8.254036f, 1e-4f, "Step2 log_probs[200]");
 
     std::cout << "[Test] TestGruModelInference passed! Precision strictly matches NumPy." << std::endl;
@@ -153,22 +200,23 @@ void TestCharIndexIntegration()
 
     charindex::CharIndex indexer;
     std::string chardata_path = FindDataFile("chardata.bin");
-    bool loaded_char = indexer.LoadFile(chardata_path);
+    const bool loaded_char = indexer.LoadFile(chardata_path);
+    (void)loaded_char;
     assert(loaded_char && "Failed to load chardata.bin");
 
     gruscorer::GruModel model;
     std::string model_path = FindDataFile("dummy_model.bin");
-    bool loaded_model = model.LoadModel(model_path);
+    const bool loaded_model = model.LoadModel(model_path);
+    (void)loaded_model;
     assert(loaded_model && "Failed to load dummy_model.bin");
 
-    // Test ScoreString with Japanese string
-    const std::string text = "今日は良い天気";
+    std::string text = "今日は良い天気";
     float score = model.ScoreString(indexer, text);
+
     std::cout << "  - Text: \"" << text << "\", Log-likelihood Score: " << score << std::endl;
     assert(!std::isnan(score) && !std::isinf(score));
-    assert(score < 0.0f); // log probability sum should be negative
+    assert(score < 0.0f);
 
-    // Empty string should yield 0
     assert(model.ScoreString(indexer, "") == 0.0f);
 
     std::cout << "[Test] TestCharIndexIntegration passed!" << std::endl;
@@ -180,23 +228,23 @@ void TestGruContextCaching()
 
     charindex::CharIndex indexer;
     std::string chardata_path = FindDataFile("chardata.bin");
-    bool loaded_char = indexer.LoadFile(chardata_path);
-    assert(loaded_char && "Failed to load chardata.bin");
+    assert(indexer.LoadFile(chardata_path));
 
     gruscorer::GruModel model;
     std::string model_path = FindDataFile("dummy_model.bin");
-    bool loaded_model = model.LoadModel(model_path);
-    assert(loaded_model && "Failed to load dummy_model.bin");
+    assert(model.LoadModel(model_path));
 
-    // 1. Empty prefix context
-    auto empty_ctx = model.ComputeContext(indexer, "");
-    assert(empty_ctx.is_empty);
+    const std::string full_text = "今日は良い天気";
+    float score_full = model.ScoreString(indexer, full_text, nullptr, false);
 
-    // 2. Score with empty context should equal ScoreString without context
-    const std::string text = "今日は良い天気";
-    float score_full = model.ScoreString(indexer, text, nullptr, false);
-    float score_with_empty_ctx = model.ScoreStringWithContext(indexer, text, empty_ctx, false);
-    AssertNear(score_full, score_with_empty_ctx, 1e-5f, "Score with empty context");
+    // 1. Empty context test
+    gruscorer::GruContext empty_ctx;
+    float score_empty_ctx = model.ScoreStringWithContext(indexer, full_text, empty_ctx, false);
+    AssertNear(score_empty_ctx, score_full, 1e-5f, "Empty context scoring == full ScoreString");
+
+    // 2. Empty string with context
+    auto ctx_partial = model.ComputeContext(indexer, "今日は");
+    AssertNear(model.ScoreStringWithContext(indexer, "", ctx_partial, false), 0.0f, 1e-5f, "Empty string with context");
 
     // 3. Mathematical consistency of chain rule:
     // log P(AB) = log P(A) + log P(B | A)
@@ -218,7 +266,8 @@ void BenchmarkInference()
     std::cout << "[Bench] Running BenchmarkInference..." << std::endl;
 
     gruscorer::GruModel model;
-    model.LoadModel("dummy_model.bin") || model.LoadModel("../dummy_model.bin");
+    std::string model_path = FindDataFile("dummy_model.bin");
+    model.LoadModel(model_path);
 
     const size_t H = model.hidden_size();
     const size_t V = model.vocab_size();

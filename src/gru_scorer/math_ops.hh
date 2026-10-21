@@ -4,13 +4,30 @@
 #include <cstddef>
 #include <algorithm>
 
+#if defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+#endif
+
 namespace gruscorer::math
 {
 
 /**
- * @brief Computes dot product of two float arrays with loop unrolling for ILP and vectorization.
+ * @brief Checks runtime CPU support for AVX2 and FMA extensions.
  */
-inline float DotProduct(const float *a, const float *b, size_t n) noexcept
+inline bool HasAvx2Fma() noexcept
+{
+#if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(_M_X64))
+    static const bool supported = __builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma");
+    return supported;
+#else
+    return false;
+#endif
+}
+
+/**
+ * @brief Computes dot product of two float arrays with loop unrolling for ILP (Scalar fallback).
+ */
+inline float DotProductScalar(const float *a, const float *b, size_t n) noexcept
 {
     float sum0 = 0.0f;
     float sum1 = 0.0f;
@@ -34,24 +51,175 @@ inline float DotProduct(const float *a, const float *b, size_t n) noexcept
     return total;
 }
 
+#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((target("avx2,fma")))
+#endif
+inline float HSum256(__m256 v) noexcept
+{
+    __m128 lo = _mm256_castps256_ps128(v);
+    __m128 hi = _mm256_extractf128_ps(v, 1);
+    __m128 s = _mm_add_ps(lo, hi);
+    __m128 shuf = _mm_movehl_ps(s, s);
+    s = _mm_add_ps(s, shuf);
+    shuf = _mm_shuffle_ps(s, s, 1);
+    s = _mm_add_ss(s, shuf);
+    return _mm_cvtss_f32(s);
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((target("avx2,fma")))
+#endif
+inline float DotProductAvx2Fma(const float *a, const float *b, size_t n) noexcept
+{
+    size_t i = 0;
+    __m256 acc0 = _mm256_setzero_ps();
+    __m256 acc1 = _mm256_setzero_ps();
+
+    for (; i + 16 <= n; i += 16)
+    {
+        acc0 = _mm256_fmadd_ps(_mm256_loadu_ps(&a[i]), _mm256_loadu_ps(&b[i]), acc0);
+        acc1 = _mm256_fmadd_ps(_mm256_loadu_ps(&a[i + 8]), _mm256_loadu_ps(&b[i + 8]), acc1);
+    }
+    if (i + 8 <= n)
+    {
+        acc0 = _mm256_fmadd_ps(_mm256_loadu_ps(&a[i]), _mm256_loadu_ps(&b[i]), acc0);
+        i += 8;
+    }
+
+    float total = HSum256(_mm256_add_ps(acc0, acc1));
+    for (; i < n; ++i)
+    {
+        total += a[i] * b[i];
+    }
+    return total;
+}
+
 /**
- * @brief Matrix-vector product: y = W * x + b
- * @param W Row-major matrix of size [rows x cols]
- * @param x Vector of size [cols]
- * @param b Optional bias vector of size [rows] (can be nullptr)
- * @param y Output vector of size [rows]
+ * @brief High-throughput Matrix-vector product using 4-row register tiling with AVX2 + FMA: y = W * x + b
  */
-inline void Gemv(const float *W, const float *x, const float *b, float *y, size_t rows, size_t cols) noexcept
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((target("avx2,fma")))
+#endif
+inline void GemvAvx2Fma(const float *W, const float *x, const float *b, float *y, size_t rows, size_t cols) noexcept
+{
+    size_t r = 0;
+
+    // Process 4 rows simultaneously to hide FMA instruction latency (4 cycles)
+    for (; r + 4 <= rows; r += 4)
+    {
+        const float *w0 = &W[(r + 0) * cols];
+        const float *w1 = &W[(r + 1) * cols];
+        const float *w2 = &W[(r + 2) * cols];
+        const float *w3 = &W[(r + 3) * cols];
+
+        __m256 acc0 = _mm256_setzero_ps();
+        __m256 acc1 = _mm256_setzero_ps();
+        __m256 acc2 = _mm256_setzero_ps();
+        __m256 acc3 = _mm256_setzero_ps();
+
+        size_t c = 0;
+        for (; c + 8 <= cols; c += 8)
+        {
+            __m256 vx = _mm256_loadu_ps(&x[c]);
+            acc0 = _mm256_fmadd_ps(_mm256_loadu_ps(&w0[c]), vx, acc0);
+            acc1 = _mm256_fmadd_ps(_mm256_loadu_ps(&w1[c]), vx, acc1);
+            acc2 = _mm256_fmadd_ps(_mm256_loadu_ps(&w2[c]), vx, acc2);
+            acc3 = _mm256_fmadd_ps(_mm256_loadu_ps(&w3[c]), vx, acc3);
+        }
+
+        float s0 = HSum256(acc0);
+        float s1 = HSum256(acc1);
+        float s2 = HSum256(acc2);
+        float s3 = HSum256(acc3);
+
+        for (; c < cols; ++c)
+        {
+            const float xc = x[c];
+            s0 += w0[c] * xc;
+            s1 += w1[c] * xc;
+            s2 += w2[c] * xc;
+            s3 += w3[c] * xc;
+        }
+
+        if (b != nullptr)
+        {
+            s0 += b[r + 0];
+            s1 += b[r + 1];
+            s2 += b[r + 2];
+            s3 += b[r + 3];
+        }
+
+        y[r + 0] = s0;
+        y[r + 1] = s1;
+        y[r + 2] = s2;
+        y[r + 3] = s3;
+    }
+
+    // Process remaining rows (1 row at a time)
+    for (; r < rows; ++r)
+    {
+        const float *wr = &W[r * cols];
+        __m256 acc = _mm256_setzero_ps();
+        size_t c = 0;
+        for (; c + 8 <= cols; c += 8)
+        {
+            acc = _mm256_fmadd_ps(_mm256_loadu_ps(&wr[c]), _mm256_loadu_ps(&x[c]), acc);
+        }
+        float s = HSum256(acc);
+        for (; c < cols; ++c)
+        {
+            s += wr[c] * x[c];
+        }
+        if (b != nullptr)
+        {
+            s += b[r];
+        }
+        y[r] = s;
+    }
+}
+#endif
+
+inline float DotProduct(const float *a, const float *b, size_t n) noexcept
+{
+#if defined(__x86_64__) || defined(_M_X64)
+    if (HasAvx2Fma() && n >= 8)
+    {
+        return DotProductAvx2Fma(a, b, n);
+    }
+#endif
+    return DotProductScalar(a, b, n);
+}
+
+/**
+ * @brief Matrix-vector product (Scalar fallback): y = W * x + b
+ */
+inline void GemvScalar(const float *W, const float *x, const float *b, float *y, size_t rows, size_t cols) noexcept
 {
     for (size_t r = 0; r < rows; ++r)
     {
-        float val = DotProduct(&W[r * cols], x, cols);
+        float val = DotProductScalar(&W[r * cols], x, cols);
         if (b != nullptr)
         {
             val += b[r];
         }
         y[r] = val;
     }
+}
+
+/**
+ * @brief Dynamic CPU-dispatched Matrix-vector product: y = W * x + b
+ */
+inline void Gemv(const float *W, const float *x, const float *b, float *y, size_t rows, size_t cols) noexcept
+{
+#if defined(__x86_64__) || defined(_M_X64)
+    if (HasAvx2Fma() && cols >= 8)
+    {
+        GemvAvx2Fma(W, x, b, y, rows, cols);
+        return;
+    }
+#endif
+    GemvScalar(W, x, b, y, rows, cols);
 }
 
 /**
@@ -62,13 +230,67 @@ inline float Sigmoid(float x) noexcept
     return 1.0f / (1.0f + std::exp(-x));
 }
 
-/**
- * @brief Numerically stable Log-Softmax computation
- * log_prob[i] = x[i] - (max_x + log(sum(exp(x[j] - max_x))))
- */
-inline void LogSoftmax(const float *in, float *out, size_t n) noexcept
+#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((target("avx2")))
+#endif
+inline float ComputeLogSumExpAvx2(const float *in, size_t n) noexcept
 {
-    if (n == 0) return;
+    if (n == 0) return 0.0f;
+
+    // Vectorized max reduction
+    size_t i = 0;
+    __m256 max_vec = _mm256_set1_ps(in[0]);
+    for (; i + 8 <= n; i += 8)
+    {
+        max_vec = _mm256_max_ps(max_vec, _mm256_loadu_ps(&in[i]));
+    }
+    __m128 max_lo = _mm256_castps256_ps128(max_vec);
+    __m128 max_hi = _mm256_extractf128_ps(max_vec, 1);
+    __m128 m128 = _mm_max_ps(max_lo, max_hi);
+    __m128 shuf = _mm_movehl_ps(m128, m128);
+    m128 = _mm_max_ps(m128, shuf);
+    shuf = _mm_shuffle_ps(m128, m128, 1);
+    m128 = _mm_max_ss(m128, shuf);
+    float max_val = _mm_cvtss_f32(m128);
+
+    for (; i < n; ++i)
+    {
+        if (in[i] > max_val)
+        {
+            max_val = in[i];
+        }
+    }
+
+    float sum_exp = 0.0f;
+    for (size_t j = 0; j < n; ++j)
+    {
+        sum_exp += std::exp(in[j] - max_val);
+    }
+    return max_val + std::log(sum_exp);
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((target("avx2")))
+#endif
+inline void LogSoftmaxAvx2(const float *in, float *out, size_t n, float log_denom) noexcept
+{
+    size_t i = 0;
+    __m256 vdenom = _mm256_set1_ps(log_denom);
+    for (; i + 8 <= n; i += 8)
+    {
+        _mm256_storeu_ps(&out[i], _mm256_sub_ps(_mm256_loadu_ps(&in[i]), vdenom));
+    }
+    for (; i < n; ++i)
+    {
+        out[i] = in[i] - log_denom;
+    }
+}
+#endif
+
+inline float ComputeLogSumExpScalar(const float *in, size_t n) noexcept
+{
+    if (n == 0) return 0.0f;
 
     float max_val = in[0];
     for (size_t i = 1; i < n; ++i)
@@ -80,12 +302,45 @@ inline void LogSoftmax(const float *in, float *out, size_t n) noexcept
     }
 
     float sum_exp = 0.0f;
-    for (size_t i = 0; i < n; ++i)
+    for (size_t j = 0; j < n; ++j)
     {
-        sum_exp += std::exp(in[i] - max_val);
+        sum_exp += std::exp(in[j] - max_val);
     }
+    return max_val + std::log(sum_exp);
+}
 
-    const float log_denom = max_val + std::log(sum_exp);
+/**
+ * @brief Numerically stable LogSumExp: log(sum(exp(x_i)))
+ */
+inline float ComputeLogSumExp(const float *in, size_t n) noexcept
+{
+#if defined(__x86_64__) || defined(_M_X64)
+    if (HasAvx2Fma() && n >= 8)
+    {
+        return ComputeLogSumExpAvx2(in, n);
+    }
+#endif
+    return ComputeLogSumExpScalar(in, n);
+}
+
+/**
+ * @brief Numerically stable Log-Softmax computation
+ * log_prob[i] = in[i] - LogSumExp(in)
+ */
+inline void LogSoftmax(const float *in, float *out, size_t n) noexcept
+{
+    if (n == 0) return;
+
+    const float log_denom = ComputeLogSumExp(in, n);
+
+#if defined(__x86_64__) || defined(_M_X64)
+    if (HasAvx2Fma() && n >= 8)
+    {
+        LogSoftmaxAvx2(in, out, n, log_denom);
+        return;
+    }
+#endif
+
     for (size_t i = 0; i < n; ++i)
     {
         out[i] = in[i] - log_denom;
@@ -124,4 +379,3 @@ inline void GruCellUpdate(const float *gi,
 }
 
 } // namespace gruscorer::math
-

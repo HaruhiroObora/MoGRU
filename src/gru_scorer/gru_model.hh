@@ -21,7 +21,7 @@ struct ModelHeader
     char magic[4];        // "GRUM"
     uint32_t version;     // 1
     uint32_t vocab_size;  // e.g. 4096
-    uint32_t hidden_size; // e.g. 64 or 128
+    uint32_t hidden_size; // e.g. 64, 128, 256
     uint32_t data_type;   // 0: FP32
     uint8_t reserved[44]; // Padding to make header exactly 64 bytes
 };
@@ -80,6 +80,22 @@ public:
               float *log_probs_out) const;
 
     /**
+     * @brief Executes GRU step and computes only the log-probability of target_token: log P(target_token | history).
+     *
+     * Zero-Store optimization: avoids writing back the full vocab_size LogSoftmax vector to memory.
+     *
+     * @param token_id Input token index (0 to vocab_size - 1)
+     * @param h_prev Previous hidden state (array of size hidden_size, or nullptr for zeros)
+     * @param h_next Output next hidden state (array of size hidden_size, must not be nullptr)
+     * @param target_token Target token whose log probability is computed
+     * @return Log-probability of target_token
+     */
+    float StepWithTargetLogProb(uint16_t token_id,
+                                const float *h_prev,
+                                float *h_next,
+                                uint16_t target_token) const;
+
+    /**
      * @brief Compute the final hidden state and last token ID for a prefix string.
      *
      * Iterates characters from <bos> without computing output log probabilities.
@@ -132,6 +148,13 @@ private:
         void operator()(float *ptr) const noexcept;
     };
 
+    /**
+     * @brief Internal helper to forward GRU cell state: computes h_next from token_id and h_prev.
+     */
+    void ForwardGruCell(uint16_t token_id,
+                        const float *h_prev,
+                        float *h_next) const;
+
     bool is_loaded_ = false;
     uint32_t vocab_size_ = 0;
     uint32_t hidden_size_ = 0;
@@ -149,4 +172,3 @@ private:
 };
 
 } // namespace gruscorer
-

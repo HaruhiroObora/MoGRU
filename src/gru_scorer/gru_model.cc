@@ -2,10 +2,10 @@
 #include "gru_scorer/math_ops.hh"
 #include "gru_scorer/charindex.hh"
 
-#include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
-#include <new>
+#include <iostream>
 #include <vector>
 
 namespace gruscorer
@@ -13,7 +13,11 @@ namespace gruscorer
 
 void GruModel::AlignedDeleter::operator()(float *ptr) const noexcept
 {
-    ::operator delete[](ptr, std::align_val_t{64});
+#if defined(_MSC_VER)
+    _aligned_free(ptr);
+#else
+    std::free(ptr);
+#endif
 }
 
 GruModel::GruModel() = default;
@@ -35,8 +39,8 @@ bool GruModel::LoadModel(const std::string &path)
     }
 
     ModelHeader header;
-    fin.read(reinterpret_cast<char *>(&header), sizeof(header));
-    if (fin.gcount() != sizeof(header))
+    fin.read(reinterpret_cast<char *>(&header), sizeof(ModelHeader));
+    if (fin.gcount() != sizeof(ModelHeader))
     {
         return false;
     }
@@ -46,12 +50,7 @@ bool GruModel::LoadModel(const std::string &path)
         return false;
     }
 
-    if (header.version != kCurrentVersion)
-    {
-        return false;
-    }
-
-    if (header.data_type != kDataTypeFp32)
+    if (header.version != kCurrentVersion || header.data_type != kDataTypeFp32)
     {
         return false;
     }
@@ -59,34 +58,35 @@ bool GruModel::LoadModel(const std::string &path)
     vocab_size_ = header.vocab_size;
     hidden_size_ = header.hidden_size;
 
-    if (vocab_size_ == 0 || hidden_size_ == 0)
-    {
-        return false;
-    }
+    const size_t H = hidden_size_;
+    const size_t V = vocab_size_;
 
-    const size_t size_emb = static_cast<size_t>(vocab_size_) * hidden_size_;
-    const size_t size_ih = 3 * static_cast<size_t>(hidden_size_) * hidden_size_;
-    const size_t size_hh = 3 * static_cast<size_t>(hidden_size_) * hidden_size_;
-    const size_t size_bih = 3 * static_cast<size_t>(hidden_size_);
-    const size_t size_bhh = 3 * static_cast<size_t>(hidden_size_);
-    const size_t size_out = static_cast<size_t>(vocab_size_) * hidden_size_;
-    const size_t size_bout = vocab_size_;
+    const size_t size_emb = V * H;
+    const size_t size_ih  = 3 * H * H;
+    const size_t size_hh  = 3 * H * H;
+    const size_t size_bih = 3 * H;
+    const size_t size_bhh = 3 * H;
+    const size_t size_out = V * H;
+    const size_t size_bout = V;
 
     const size_t total_elements = size_emb + size_ih + size_hh + size_bih + size_bhh + size_out + size_bout;
     const size_t total_bytes = total_elements * sizeof(float);
 
-    // Verify file size
-    fin.seekg(0, std::ios::end);
-    const auto file_size = static_cast<size_t>(fin.tellg());
-    fin.seekg(sizeof(header), std::ios::beg);
+    float *raw_buf = nullptr;
+#if defined(_MSC_VER)
+    raw_buf = static_cast<float *>(_aligned_malloc(total_bytes, 64));
+#else
+    if (posix_memalign(reinterpret_cast<void **>(&raw_buf), 64, total_bytes) != 0)
+    {
+        return false;
+    }
+#endif
 
-    if (file_size < sizeof(header) + total_bytes)
+    if (raw_buf == nullptr)
     {
         return false;
     }
 
-    // Allocate 64-byte aligned buffer
-    float *raw_buf = static_cast<float *>(::operator new[](total_bytes, std::align_val_t{64}));
     weights_buffer_.reset(raw_buf);
 
     fin.read(reinterpret_cast<char *>(raw_buf), total_bytes);
@@ -110,16 +110,10 @@ bool GruModel::LoadModel(const std::string &path)
     return true;
 }
 
-void GruModel::Step(uint16_t token_id,
-                    const float *h_prev,
-                    float *h_next,
-                    float *log_probs_out) const
+void GruModel::ForwardGruCell(uint16_t token_id,
+                              const float *h_prev,
+                              float *h_next) const
 {
-    if (!is_loaded_)
-    {
-        return;
-    }
-
     if (token_id >= vocab_size_) [[unlikely]]
     {
         token_id = kUnkTokenId;
@@ -128,8 +122,6 @@ void GruModel::Step(uint16_t token_id,
     const size_t H = hidden_size_;
     const size_t H3 = 3 * H;
 
-    // Fixed stack buffer for common hidden sizes (H <= 256 -> H3 <= 768 floats = 3 KB)
-    // Avoids any dynamic memory allocation in the hot path.
     constexpr size_t kMaxStackH3 = 768;
     alignas(64) float gi_stack[kMaxStackH3];
     alignas(64) float gh_stack[kMaxStackH3];
@@ -180,13 +172,61 @@ void GruModel::Step(uint16_t token_id,
     }
 
     math::GruCellUpdate(gi, gh, prev_h_vec, h_next, H);
+}
 
-    // 5. Output layer: log_probs = LogSoftmax(W_out * h_next + b_out)
+void GruModel::Step(uint16_t token_id,
+                    const float *h_prev,
+                    float *h_next,
+                    float *log_probs_out) const
+{
+    if (!is_loaded_)
+    {
+        return;
+    }
+
+    ForwardGruCell(token_id, h_prev, h_next);
+
+    // Output layer: log_probs = LogSoftmax(W_out * h_next + b_out)
     if (log_probs_out != nullptr)
     {
-        math::Gemv(w_out_, h_next, b_out_, log_probs_out, vocab_size_, H);
+        math::Gemv(w_out_, h_next, b_out_, log_probs_out, vocab_size_, hidden_size_);
         math::LogSoftmax(log_probs_out, log_probs_out, vocab_size_);
     }
+}
+
+float GruModel::StepWithTargetLogProb(uint16_t token_id,
+                                      const float *h_prev,
+                                      float *h_next,
+                                      uint16_t target_token) const
+{
+    if (!is_loaded_)
+    {
+        return 0.0f;
+    }
+
+    ForwardGruCell(token_id, h_prev, h_next);
+
+    if (target_token >= vocab_size_) [[unlikely]]
+    {
+        target_token = kUnkTokenId;
+    }
+
+    constexpr size_t kMaxStackVocab = 4096;
+    alignas(64) float logits_stack[kMaxStackVocab];
+    std::vector<float> logits_heap;
+    float *logits = logits_stack;
+
+    if (vocab_size_ > kMaxStackVocab) [[unlikely]]
+    {
+        logits_heap.resize(vocab_size_);
+        logits = logits_heap.data();
+    }
+
+    // Compute all logits for LogSumExp denominator
+    math::Gemv(w_out_, h_next, b_out_, logits, vocab_size_, hidden_size_);
+
+    const float log_denom = math::ComputeLogSumExp(logits, vocab_size_);
+    return logits[target_token] - log_denom;
 }
 
 GruContext GruModel::ComputeContext(const charindex::CharIndex &indexer,
@@ -228,8 +268,7 @@ GruContext GruModel::ComputeContext(const charindex::CharIndex &indexer,
     uint16_t prev_token = kBosTokenId;
     for (size_t t = 0; t < token_ids.size(); ++t)
     {
-        // Compute next hidden state without calculating log probabilities
-        Step(prev_token, (t == 0) ? nullptr : h_curr, h_next, nullptr);
+        ForwardGruCell(prev_token, (t == 0) ? nullptr : h_curr, h_next);
 
         uint16_t target_token = token_ids[t];
         if (target_token >= vocab_size_) [[unlikely]]
@@ -288,28 +327,26 @@ float GruModel::ScoreStringWithContext(const charindex::CharIndex &indexer,
     float *h_curr = h_buf1.data();
     float *h_next = h_buf2.data();
 
-    alignas(64) std::vector<float> log_probs(vocab_size_);
     float total_log_prob = 0.0f;
     uint16_t prev_token = context.last_token;
 
     for (size_t t = 0; t < token_ids.size(); ++t)
     {
-        Step(prev_token, h_curr, h_next, log_probs.data());
-
         uint16_t target_token = token_ids[t];
         if (target_token >= vocab_size_) [[unlikely]]
         {
             target_token = kUnkTokenId;
         }
 
-        float token_log_prob = log_probs[target_token];
+        // Fast zero-store step: directly computes log P(target_token | history)
+        float token_log_prob = StepWithTargetLogProb(prev_token, h_curr, h_next, target_token);
+
         if (target_token == kUnkTokenId)
         {
             token_log_prob = std::min(token_log_prob, -6.0f) - 6.0f;
         }
 
         total_log_prob += token_log_prob;
-
         prev_token = target_token;
         std::swap(h_curr, h_next);
     }
@@ -334,7 +371,7 @@ float GruModel::ScoreString(const charindex::CharIndex &indexer,
 
     // Parse UTF-8 string into token IDs
     std::vector<uint16_t> token_ids;
-    token_ids.reserve(utf8_str.size()); // Upper bound on character count
+    token_ids.reserve(utf8_str.size());
 
     std::string_view remaining = utf8_str;
     while (!remaining.empty())
@@ -367,33 +404,30 @@ float GruModel::ScoreString(const charindex::CharIndex &indexer,
         std::memcpy(h_curr, initial_h, H * sizeof(float));
     }
 
-    // Buffer for output log probabilities (4096 floats = 16 KB)
-    alignas(64) std::vector<float> log_probs(vocab_size_);
-
     float total_log_prob = 0.0f;
     uint16_t prev_token = kBosTokenId;
 
     for (size_t t = 0; t < token_ids.size(); ++t)
     {
-        // Compute P(* | prev_token) and update hidden state
-        Step(prev_token, (t == 0 && initial_h == nullptr) ? nullptr : h_curr, h_next, log_probs.data());
-
         uint16_t target_token = token_ids[t];
         if (target_token >= vocab_size_) [[unlikely]]
         {
             target_token = kUnkTokenId;
         }
 
-        float token_log_prob = log_probs[target_token];
+        // Fast zero-store step: directly computes log P(target_token | history)
+        float token_log_prob = StepWithTargetLogProb(
+            prev_token,
+            (t == 0 && initial_h == nullptr) ? nullptr : h_curr,
+            h_next,
+            target_token);
+
         if (target_token == kUnkTokenId)
         {
-            // UNK penalty: UNK probability in LM represents aggregate of all OOV characters.
-            // Heavy penalty ensures individual OOV characters or emojis cannot game the normalized score.
             token_log_prob = std::min(token_log_prob, -6.0f) - 6.0f;
         }
 
         total_log_prob += token_log_prob;
-
         prev_token = target_token;
         std::swap(h_curr, h_next);
     }
@@ -407,4 +441,3 @@ float GruModel::ScoreString(const charindex::CharIndex &indexer,
 }
 
 } // namespace gruscorer
-
