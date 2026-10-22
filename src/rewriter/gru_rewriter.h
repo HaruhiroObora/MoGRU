@@ -18,6 +18,8 @@
 #include "rewriter/rewriter_interface.h"
 
 ABSL_DECLARE_FLAG(bool, enable_gru_rewriter);
+ABSL_DECLARE_FLAG(bool, enable_gru_resegmentation);
+ABSL_DECLARE_FLAG(int32_t, gru_resegment_cost_threshold);
 ABSL_DECLARE_FLAG(double, gru_score_weight);
 ABSL_DECLARE_FLAG(double, gru_katakana_penalty);
 ABSL_DECLARE_FLAG(double, gru_hiragana_penalty);
@@ -34,16 +36,20 @@ class CharIndex;
 
 namespace mozc {
 
+class ImmutableConverterInterface;
+
 struct GruPenaltyConfig {
   double katakana_penalty = 500.0;
   double hiragana_penalty = 300.0;
   double emoji_penalty = 15000.0;
   double alphabet_multiplier = 2.0;
+  bool enable_resegmentation = true;
+  double resegment_threshold = 600.0;
 };
 
 class GruRewriter : public RewriterInterface {
  public:
-  GruRewriter();
+  explicit GruRewriter(const ImmutableConverterInterface* immutable_converter = nullptr);
   ~GruRewriter() override;
 
   int capability(const ConversionRequest& request) const override {
@@ -64,8 +70,30 @@ class GruRewriter : public RewriterInterface {
   bool Reload() override;
 
  private:
+  struct ResegmentResult {
+    std::vector<uint8_t> new_sizes;
+    double score_diff = 0.0;
+  };
+
   bool EnsureInitialized() const;
   GruPenaltyConfig GetPenaltyConfig() const;
+
+  std::optional<ResegmentResult> EvaluateResegmentation(
+      const Segments& segments,
+      size_t start_seg_idx,
+      const std::string& prefix_context,
+      const GruPenaltyConfig& penalty_config,
+      double alpha,
+      size_t focused_seg_idx = static_cast<size_t>(-1),
+      int focused_cand_idx = 0) const;
+
+  bool RerankSegmentsWithBeamSearch(
+      Segments* segments,
+      size_t start_seg_idx,
+      const std::string& prefix_context,
+      const GruPenaltyConfig& penalty_config,
+      double alpha,
+      bool show_score) const;
 
   mutable absl::Mutex mutex_;
   mutable std::unique_ptr<gruscorer::GruModel> model_ ABSL_GUARDED_BY(mutex_);
@@ -77,6 +105,8 @@ class GruRewriter : public RewriterInterface {
   mutable int64_t last_config_mtime_ ABSL_GUARDED_BY(mutex_) = 0;
   mutable absl::Time last_config_check_time_ ABSL_GUARDED_BY(mutex_) = absl::InfinitePast();
   mutable bool is_initialized_ ABSL_GUARDED_BY(mutex_) = false;
+
+  const ImmutableConverterInterface* immutable_converter_ = nullptr;
 };
 
 }  // namespace mozc

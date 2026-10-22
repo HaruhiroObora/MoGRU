@@ -170,10 +170,23 @@ Converter::Converter(
       general_noun_id_(pos_matcher_.GetGeneralNounId()) {
   DCHECK(immutable_converter_);
   predictor_ = predictor_factory(*modules_, *this, *immutable_converter_);
-  rewriter_ = rewriter_factory(*modules_);
+  rewriter_ = rewriter_factory(*modules_, *immutable_converter_);
   DCHECK(predictor_);
   DCHECK(rewriter_);
 }
+
+Converter::Converter(
+    std::unique_ptr<engine::Modules> modules,
+    const ImmutableConverterFactory& immutable_converter_factory,
+    const PredictorFactory& predictor_factory,
+    const LegacyRewriterFactory& legacy_rewriter_factory)
+    : Converter(std::move(modules), immutable_converter_factory,
+                predictor_factory,
+                [legacy_rewriter_factory](
+                    const engine::Modules& modules,
+                    const ImmutableConverterInterface& immutable_converter) {
+                  return legacy_rewriter_factory(modules);
+                }) {}
 
 bool Converter::StartConversion(const ConversionRequest& request,
                                 Segments* segments) const {

@@ -129,7 +129,8 @@ ABSL_FLAG(bool, use_history_rewriter, false, "Use history rewriter or not.");
 
 namespace mozc {
 
-Rewriter::Rewriter(const engine::Modules& modules) {
+Rewriter::Rewriter(const engine::Modules& modules,
+                   const ImmutableConverterInterface* immutable_converter) {
   const DataManager& data_manager = modules.GetDataManager();
   const dictionary::DictionaryInterface& dictionary = modules.GetDictionary();
   const dictionary::PosMatcher& pos_matcher = modules.GetPosMatcher();
@@ -170,7 +171,7 @@ Rewriter::Rewriter(const engine::Modules& modules) {
   AddRewriter(std::make_unique<ZipcodeRewriter>(pos_matcher));
   AddRewriter(std::make_unique<DiceRewriter>());
   AddRewriter(std::make_unique<SmallLetterRewriter>());
-  AddRewriter(std::make_unique<GruRewriter>());
+  AddRewriter(std::make_unique<GruRewriter>(immutable_converter));
 
   if (absl::GetFlag(FLAGS_use_history_rewriter)) {
     AddRewriter(std::make_unique<UserBoundaryHistoryRewriter>());

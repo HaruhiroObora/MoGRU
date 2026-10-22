@@ -35,9 +35,12 @@
 
 namespace mozc {
 
+class ImmutableConverterInterface;
+
 class Rewriter : public MergerRewriter {
  public:
-  explicit Rewriter(const engine::Modules& modules);
+  explicit Rewriter(const engine::Modules& modules,
+                    const ImmutableConverterInterface* immutable_converter = nullptr);
   Rewriter(const Rewriter&) = delete;
   Rewriter& operator=(const Rewriter&) = delete;
 };

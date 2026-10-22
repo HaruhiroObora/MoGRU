@@ -13,6 +13,8 @@
 #include "base/file_util.h"
 #include "converter/attribute.h"
 #include "converter/candidate.h"
+#include "converter/immutable_converter_interface.h"
+#include "converter/inner_segment.h"
 #include "converter/segments.h"
 #include "protocol/commands.pb.h"
 #include "request/conversion_request.h"
@@ -520,6 +522,204 @@ TEST_F(GruRewriterTest, PunctuationNormalizationScore) {
   };
   EXPECT_FALSE(extract_gru_tag(desc_touten).empty());
   EXPECT_EQ(extract_gru_tag(desc_comma), extract_gru_tag(desc_touten));
+}
+
+class StubImmutableConverter : public ImmutableConverterInterface {
+ public:
+  bool Convert(const ConversionOptions& options, Segments* segments) const override {
+    if (convert_fn_) {
+      return convert_fn_(options, segments);
+    }
+    return false;
+  }
+  std::function<bool(const ConversionOptions&, Segments*)> convert_fn_;
+};
+
+TEST(GruRewriterResegmentTest, NullConverterReturnsNullopt) {
+  absl::SetFlag(&FLAGS_enable_gru_rewriter, true);
+  GruRewriter rewriter(nullptr);
+  ConversionRequest request;
+  Segments segments;
+  Segment* seg = segments.add_segment();
+  seg->set_key("テスト");
+  AddCandidate("テスト", "テスト", 1000, seg);
+
+  EXPECT_EQ(rewriter.CheckResizeSegmentsRequest(request, segments), std::nullopt);
+}
+
+TEST(GruRewriterResegmentTest, AlreadyResizedReturnsNullopt) {
+  absl::SetFlag(&FLAGS_enable_gru_rewriter, true);
+  StubImmutableConverter stub_converter;
+  GruRewriter rewriter(&stub_converter);
+  ConversionRequest request;
+  Segments segments;
+  Segment* seg = segments.add_segment();
+  seg->set_key("テスト");
+  AddCandidate("テスト", "テスト", 1000, seg);
+  segments.set_resized(true);
+
+  EXPECT_EQ(rewriter.CheckResizeSegmentsRequest(request, segments), std::nullopt);
+}
+
+TEST(GruRewriterResegmentTest, ResegmentationDisabledReturnsNullopt) {
+  absl::SetFlag(&FLAGS_enable_gru_rewriter, true);
+  absl::SetFlag(&FLAGS_enable_gru_resegmentation, false);
+  StubImmutableConverter stub_converter;
+  GruRewriter rewriter(&stub_converter);
+  rewriter.Reload();
+
+  ConversionRequest request;
+  Segments segments;
+  Segment* seg = segments.add_segment();
+  seg->set_key("テスト");
+  AddCandidate("テスト", "テスト", 1000, seg);
+
+  EXPECT_EQ(rewriter.CheckResizeSegmentsRequest(request, segments), std::nullopt);
+}
+
+TEST(GruRewriterResegmentTest, TriggerResegmentWhenBetterCandidateFound) {
+  absl::SetFlag(&FLAGS_enable_gru_rewriter, true);
+  absl::SetFlag(&FLAGS_enable_gru_resegmentation, true);
+  absl::SetFlag(&FLAGS_gru_resegment_cost_threshold, 200);
+
+  StubImmutableConverter stub_converter;
+  stub_converter.convert_fn_ = [](const ConversionOptions& options, Segments* segments) {
+    if (segments->conversion_segments_size() == 0) return false;
+    Segment* seg = segments->mutable_conversion_segment(0);
+    seg->clear_candidates();
+
+    // Candidate 0: "ここでは着物を脱ぐ" (sizes: 4, 4, 2 -> [4, 4, 2])
+    converter::Candidate* cand0 = seg->add_candidate();
+    cand0->key = "ここではきものをぬぐ";
+    cand0->value = "ここでは着物を脱ぐ";
+    cand0->content_key = "ここではきものをぬぐ";
+    cand0->content_value = "ここでは着物を脱ぐ";
+    cand0->cost = 3000;
+    cand0->inner_segment_boundary = {
+        *converter::EncodeLengths(12, 12, 12, 12),  // "ここでは"
+        *converter::EncodeLengths(12, 9, 12, 9),    // "きものを" -> "着物を"
+        *converter::EncodeLengths(6, 6, 6, 6)       // "ぬぐ" -> "脱ぐ"
+    };
+
+    // Candidate 1: "ここで履物を脱ぐ" (sizes: 3, 5, 2 -> [3, 5, 2])
+    converter::Candidate* cand1 = seg->add_candidate();
+    cand1->key = "ここではきものをぬぐ";
+    cand1->value = "ここで履物を脱ぐ";
+    cand1->content_key = "ここではきものをぬぐ";
+    cand1->content_value = "ここで履物を脱ぐ";
+    cand1->cost = 1000;  // Much better cost -> triggers threshold!
+    cand1->inner_segment_boundary = {
+        *converter::EncodeLengths(9, 9, 9, 9),      // "ここで"
+        *converter::EncodeLengths(15, 9, 15, 9),    // "はきものを" -> "履物を"
+        *converter::EncodeLengths(6, 6, 6, 6)       // "ぬぐ" -> "脱ぐ"
+    };
+
+    return true;
+  };
+
+  GruRewriter rewriter(&stub_converter);
+  rewriter.Reload();
+
+  ConversionRequest request;
+  Segments segments;
+
+  // Initial segments: "ここでは" (4 chars), "きものを" (4 chars), "ぬぐ" (2 chars)
+  Segment* seg0 = segments.add_segment();
+  seg0->set_key("ここでは");
+  AddCandidate("ここでは", "ここでは", 1000, seg0);
+
+  Segment* seg1 = segments.add_segment();
+  seg1->set_key("きものを");
+  AddCandidate("きものを", "着物を", 1000, seg1);
+
+  Segment* seg2 = segments.add_segment();
+  seg2->set_key("ぬぐ");
+  AddCandidate("ぬぐ", "脱ぐ", 1000, seg2);
+
+  auto resize_req = rewriter.CheckResizeSegmentsRequest(request, segments);
+  ASSERT_TRUE(resize_req.has_value());
+  EXPECT_EQ(resize_req->segment_index, 0);
+
+  // Expected resegmented lengths: [3, 5, 2] ("ここで", "はきものを/履物を", "ぬぐ/脱ぐ")
+  EXPECT_EQ(resize_req->segment_sizes[0], 3);
+  EXPECT_EQ(resize_req->segment_sizes[1], 5);
+  EXPECT_EQ(resize_req->segment_sizes[2], 2);
+  EXPECT_EQ(resize_req->segment_sizes[3], 0);
+}
+
+TEST(GruRewriterResegmentTest, FocusTriggerResegmentWhenBetterCandidateFound) {
+  absl::SetFlag(&FLAGS_enable_gru_rewriter, true);
+  absl::SetFlag(&FLAGS_enable_gru_resegmentation, true);
+  absl::SetFlag(&FLAGS_gru_resegment_cost_threshold, 200);
+
+  StubImmutableConverter stub_converter;
+  stub_converter.convert_fn_ = [](const ConversionOptions& options, Segments* segments) {
+    if (segments->segments_size() < 2) return false;
+    if (options.request_type == RequestType::PREDICTION) {
+      Segment* target = segments->mutable_segment(segments->segments_size() - 1);
+      target->clear_candidates();
+
+      // Candidate with better cost: sizes [3, 5, 2]
+      converter::Candidate* cand = target->add_candidate();
+      cand->key = "ここではきものをぬぐ";
+      cand->value = "ここで履物を脱ぐ";
+      cand->content_key = "ここではきものをぬぐ";
+      cand->content_value = "ここで履物を脱ぐ";
+      cand->cost = 1000;
+      cand->inner_segment_boundary = {
+          *converter::EncodeLengths(9, 9, 9, 9),      // "ここで" (3 chars)
+          *converter::EncodeLengths(15, 9, 15, 9),    // "はきものを" (5 chars)
+          *converter::EncodeLengths(6, 6, 6, 6)       // "ぬぐ" (2 chars)
+      };
+      return true;
+    }
+    // For actual conversion after resize (CONVERSION mode), populate candidates for each segment
+    for (size_t i = 1; i < segments->segments_size(); ++i) {
+      Segment* seg = segments->mutable_segment(i);
+      seg->clear_candidates();
+      AddCandidate(seg->key(), seg->key(), 1000, seg);
+    }
+    return true;
+  };
+
+  GruRewriter rewriter(&stub_converter);
+  rewriter.Reload();
+
+  Segments segments;
+  // Segment 0: "きょうは" (focused segment)
+  Segment* seg0 = segments.add_segment();
+  seg0->set_key("きょうは");
+  AddCandidate("きょうは", "今日は", 1000, seg0);
+  AddCandidate("きょうは", "教派", 1050, seg0);
+
+  // Subsequent segments: "ここでは" (4), "きものを" (4), "ぬぐ" (2)
+  Segment* seg1 = segments.add_segment();
+  seg1->set_key("ここでは");
+  AddCandidate("ここでは", "ここでは", 1000, seg1);
+
+  Segment* seg2 = segments.add_segment();
+  seg2->set_key("きものを");
+  AddCandidate("きものを", "着物を", 1000, seg2);
+
+  Segment* seg3 = segments.add_segment();
+  seg3->set_key("ぬぐ");
+  AddCandidate("ぬぐ", "脱ぐ", 1000, seg3);
+
+  // Focus on segment 0, candidate 0 ("今日は")
+  const bool focus_result = rewriter.Focus(&segments, 0, 0);
+  EXPECT_TRUE(focus_result);
+
+  // Verify that segment 0 candidates are preserved
+  EXPECT_EQ(segments.segment(0).candidates_size(), 2);
+  EXPECT_EQ(segments.segment(0).candidate(0).value, "今日は");
+  EXPECT_EQ(segments.segment(0).candidate(1).value, "教派");
+
+  // Subsequent segments should be resized according to [3, 5, 2]
+  // Total segments: 1 (seg0) + 3 (newly resized segments) = 4 segments
+  EXPECT_EQ(segments.segments_size(), 4);
+  EXPECT_EQ(segments.segment(1).key_len(), 3);  // "ここで"
+  EXPECT_EQ(segments.segment(2).key_len(), 5);  // "はきものを"
+  EXPECT_EQ(segments.segment(3).key_len(), 2);  // "ぬぐ"
 }
 
 }  // namespace

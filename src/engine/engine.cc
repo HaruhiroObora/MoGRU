@@ -97,9 +97,11 @@ absl::Status Engine::Init(std::unique_ptr<engine::Modules> modules) {
                                                        immutable_converter);
       };
 
-  auto rewriter_factory = [](const engine::Modules& modules) {
-    return std::make_unique<Rewriter>(modules);
-  };
+  auto rewriter_factory =
+      [](const engine::Modules& modules,
+         const ImmutableConverterInterface& immutable_converter) {
+        return std::make_unique<Rewriter>(modules, &immutable_converter);
+      };
 
   auto converter = std::make_shared<converter::Converter>(
       std::move(modules), immutable_converter_factory, predictor_factory,

@@ -121,6 +121,11 @@ FCITX_CONFIGURATION(
         IntConstrain(0, 100000)};
     Option<bool> showGruScore{
         this, "ShowGruScore", _("Show GRU Score in candidate description"), true};
+    Option<bool> enableGruResegmentation{
+        this, "EnableGruResegmentation", _("Enable GRU-based Segment Boundary Resegmentation"), true};
+    Option<int, IntConstrain> gruResegmentCostThreshold{
+        this, "GruResegmentCostThreshold", _("GRU Resegmentation Cost Improvement Threshold"), 600,
+        IntConstrain(0, 100000)};
     Option<bool> enableLiveConversion{
         this, "EnableLiveConversion", _("Enable Live Conversion"), true};
 

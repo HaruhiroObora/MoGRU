@@ -300,7 +300,10 @@ class ConverterTest : public testing::TestWithTempUserProfile {
           return CreatePredictor(modules, predictor_type, converter,
                                  immutable_converter);
         },
-        [&](const engine::Modules& modules) { return std::move(rewriter); });
+        [&](const engine::Modules& modules,
+            const ImmutableConverterInterface& immutable_converter) {
+          return std::move(rewriter);
+        });
   }
 
   std::unique_ptr<Converter> CreateConverter(

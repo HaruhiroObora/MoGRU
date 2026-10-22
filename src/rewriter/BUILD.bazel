@@ -1760,6 +1760,8 @@ mozc_cc_library(
         "//base:util",
         "//base:vlog",
         "//converter:attribute",
+        "//converter:immutable_converter_interface",
+        "//converter:inner_segment",
         "//converter:segments",
         "//gru_scorer",
         "//gru_scorer:charindex",
@@ -1785,6 +1787,8 @@ mozc_cc_test(
     deps = [
         ":gru_rewriter",
         "//converter:attribute",
+        "//converter:immutable_converter_interface",
+        "//converter:inner_segment",
         "//converter:segments",
         "//protocol:commands_cc_proto",
         "//request:conversion_request",

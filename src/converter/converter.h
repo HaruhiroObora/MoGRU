@@ -71,6 +71,9 @@ class Converter final : public ConverterInterface {
           const ImmutableConverterInterface& immutable_converter)>;
 
   using RewriterFactory = std::function<std::unique_ptr<RewriterInterface>(
+      const engine::Modules& modules,
+      const ImmutableConverterInterface& immutable_converter)>;
+  using LegacyRewriterFactory = std::function<std::unique_ptr<RewriterInterface>(
       const engine::Modules& modules)>;
 
   // Converter is initialized with the factory methods of ImmutableConverter,
@@ -81,6 +84,10 @@ class Converter final : public ConverterInterface {
             const ImmutableConverterFactory& immutable_converter_factory,
             const PredictorFactory& predictor_factory,
             const RewriterFactory& rewriter_factory);
+  Converter(std::unique_ptr<engine::Modules> modules,
+            const ImmutableConverterFactory& immutable_converter_factory,
+            const PredictorFactory& predictor_factory,
+            const LegacyRewriterFactory& legacy_rewriter_factory);
   Converter() = delete;
 
   [[nodiscard]]
