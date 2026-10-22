@@ -84,6 +84,9 @@ namespace charindex
     inline uint16_t CharIndex::Char2Index(const char32_t c) const
     {
         if (c > 65535) [[unlikely]] return 0;
+        if (!char2Index_) [[unlikely]] return 0;
+        if (c == 0xFF0C || c == 0xFF64) [[unlikely]] return char2Index_[0x3001]; // '，' / '､' -> '、'
+        if (c == 0xFF0E || c == 0xFF61) [[unlikely]] return char2Index_[0x3002]; // '．' / '｡' -> '。'
         return char2Index_[c];
     }
 

@@ -485,6 +485,43 @@ TEST_F(GruRewriterTest, ConfigFileHotReload) {
   std::filesystem::remove(test_config);
 }
 
+TEST_F(GruRewriterTest, PunctuationNormalizationScore) {
+  rewriter_->Reload();
+
+  ConversionRequest request;
+  Segments segments_touten;
+  Segment* seg0 = segments_touten.add_segment();
+  seg0->set_key("きょうは、");
+  AddCandidate("きょうは、", "今日は、", 1000, seg0);
+  AddCandidate("きょうは、", "教派、", 1000, seg0);
+
+  Segments segments_comma;
+  Segment* seg1 = segments_comma.add_segment();
+  seg1->set_key("きょうは，");
+  AddCandidate("きょうは，", "今日は，", 1000, seg1);
+  AddCandidate("きょうは，", "教派，", 1000, seg1);
+
+  rewriter_->Rewrite(request, &segments_touten);
+  rewriter_->Rewrite(request, &segments_comma);
+
+  // Both should select "今日は" candidates and produce identical ranking
+  EXPECT_EQ(segments_touten.conversion_segment(0).candidate(0).value, "今日は、");
+  EXPECT_EQ(segments_comma.conversion_segment(0).candidate(0).value, "今日は，");
+
+  // Descriptions should contain identical GRU score values
+  const std::string desc_touten = segments_touten.conversion_segment(0).candidate(0).description;
+  const std::string desc_comma = segments_comma.conversion_segment(0).candidate(0).description;
+
+  auto extract_gru_tag = [](const std::string& desc) {
+    const size_t pos = desc.find("GRU:");
+    if (pos == std::string::npos) return std::string();
+    const size_t end = desc.find('[', pos);
+    return desc.substr(pos, (end != std::string::npos) ? end - pos : std::string::npos);
+  };
+  EXPECT_FALSE(extract_gru_tag(desc_touten).empty());
+  EXPECT_EQ(extract_gru_tag(desc_comma), extract_gru_tag(desc_touten));
+}
+
 }  // namespace
 }  // namespace mozc
 

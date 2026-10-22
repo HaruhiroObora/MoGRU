@@ -219,6 +219,16 @@ void TestCharIndexIntegration()
 
     assert(model.ScoreString(indexer, "") == 0.0f);
 
+    // Test Japanese punctuation normalization
+    assert(indexer.Char2Index(0xFF0C) == indexer.Char2Index(0x3001));  // '，' == '、'
+    assert(indexer.Char2Index(0xFF0E) == indexer.Char2Index(0x3002));  // '．' == '。'
+    assert(indexer.Char2Index(0xFF64) == indexer.Char2Index(0x3001));  // '､' == '、'
+    assert(indexer.Char2Index(0xFF61) == indexer.Char2Index(0x3002));  // '｡' == '。'
+
+    float score_touten = model.ScoreString(indexer, "今日は、良い天気ですね。");
+    float score_comma = model.ScoreString(indexer, "今日は，良い天気ですね．");
+    AssertNear(score_comma, score_touten, 1e-5f, "Score with '，．' must match '、。'");
+
     std::cout << "[Test] TestCharIndexIntegration passed!" << std::endl;
 }
 
@@ -257,6 +267,14 @@ void TestGruContextCaching()
 
     float score_suffix = model.ScoreStringWithContext(indexer, suffix, ctx, false);
     AssertNear(score_full, score_prefix + score_suffix, 1e-4f, "Chain rule log P(AB) == log P(A) + log P(B|A)");
+
+    // 4. Punctuation normalization context consistency
+    auto ctx_touten = model.ComputeContext(indexer, "今日は、");
+    auto ctx_comma = model.ComputeContext(indexer, "今日は，");
+    assert(ctx_comma.last_token == ctx_touten.last_token);
+    for (size_t i = 0; i < model.hidden_size(); ++i) {
+        AssertNear(ctx_comma.h[i], ctx_touten.h[i], 1e-5f, "Context h with '，' must match '、'");
+    }
 
     std::cout << "[Test] TestGruContextCaching passed! Chain rule strictly holds." << std::endl;
 }
