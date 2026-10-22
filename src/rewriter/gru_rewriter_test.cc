@@ -3,11 +3,14 @@
 
 #include "rewriter/gru_rewriter.h"
 
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 
 #include "absl/flags/flag.h"
 #include "absl/strings/string_view.h"
+#include "base/file_util.h"
 #include "converter/attribute.h"
 #include "converter/candidate.h"
 #include "converter/segments.h"
@@ -405,6 +408,81 @@ TEST_F(GruRewriterTest, AlphabetCandidateDoubledGruScore) {
                   std::string::npos);
     }
   }
+}
+
+TEST_F(GruRewriterTest, KatakanaPenaltyRerank) {
+  absl::SetFlag(&FLAGS_gru_katakana_penalty, 600.0);
+  absl::SetFlag(&FLAGS_gru_score_weight, 0.0);  // isolate Viterbi + Penalty effects
+  rewriter_->Reload();
+
+  ConversionRequest request;
+  Segments segments;
+
+  Segment* seg = segments.add_segment();
+  seg->set_key("とうきょう");
+  // Candidate 0: "トウキョウ" (initial cost 1000) -> with katakana penalty 600 => effective 1600
+  // Candidate 1: "東京" (initial cost 1200) -> no penalty => effective 1200
+  AddCandidate("とうきょう", "トウキョウ", 1000, seg);
+  AddCandidate("とうきょう", "東京", 1200, seg);
+
+  EXPECT_TRUE(rewriter_->Rewrite(request, &segments));
+  EXPECT_EQ(seg->candidate(0).value, "東京");
+  EXPECT_EQ(seg->candidate(1).value, "トウキョウ");
+
+  // Verify description contains penalty tag [K+600]
+  EXPECT_TRUE(seg->candidate(1).description.find("[K+600]") != std::string::npos);
+}
+
+TEST_F(GruRewriterTest, HiraganaPenaltyRerank) {
+  absl::SetFlag(&FLAGS_gru_hiragana_penalty, 400.0);
+  absl::SetFlag(&FLAGS_gru_score_weight, 0.0);  // isolate Viterbi + Penalty effects
+  rewriter_->Reload();
+
+  ConversionRequest request;
+  Segments segments;
+
+  Segment* seg = segments.add_segment();
+  seg->set_key("とうきょう");
+  // Candidate 0: "とうきょう" (initial cost 1000) -> with hiragana penalty 400 => effective 1400
+  // Candidate 1: "東京" (initial cost 1200) -> no penalty => effective 1200
+  AddCandidate("とうきょう", "とうきょう", 1000, seg);
+  AddCandidate("とうきょう", "東京", 1200, seg);
+
+  EXPECT_TRUE(rewriter_->Rewrite(request, &segments));
+  EXPECT_EQ(seg->candidate(0).value, "東京");
+  EXPECT_EQ(seg->candidate(1).value, "とうきょう");
+
+  // Verify description contains penalty tag [H+400]
+  EXPECT_TRUE(seg->candidate(1).description.find("[H+400]") != std::string::npos);
+}
+
+TEST_F(GruRewriterTest, ConfigFileHotReload) {
+  const std::string test_config = FileUtil::JoinPath(
+      std::filesystem::temp_directory_path().string(), "test_gru_config.ini");
+  {
+    std::ofstream ofs(test_config);
+    ofs << "katakana_penalty = 1200.0\n"
+        << "hiragana_penalty = 800.0\n";
+  }
+
+  absl::SetFlag(&FLAGS_gru_config_path, test_config);
+  absl::SetFlag(&FLAGS_gru_score_weight, 0.0);
+  rewriter_->Reload();
+
+  ConversionRequest request;
+  Segments segments;
+
+  Segment* seg = segments.add_segment();
+  seg->set_key("てすと");
+  AddCandidate("てすと", "テスト", 1000, seg);  // katakana +1200 => 2200
+  AddCandidate("てすと", "試験", 1500, seg);    // kanji => 1500
+
+  EXPECT_TRUE(rewriter_->Rewrite(request, &segments));
+  EXPECT_EQ(seg->candidate(0).value, "試験");
+  EXPECT_TRUE(seg->candidate(1).description.find("[K+1200]") != std::string::npos);
+
+  // Clean up
+  std::filesystem::remove(test_config);
 }
 
 }  // namespace

@@ -4,21 +4,26 @@
 #ifndef MOZC_REWRITER_GRU_REWRITER_H_
 #define MOZC_REWRITER_GRU_REWRITER_H_
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
 
 #include "absl/base/thread_annotations.h"
+#include "absl/flags/declare.h"
 #include "absl/synchronization/mutex.h"
+#include "absl/time/time.h"
 #include "converter/segments.h"
 #include "request/conversion_request.h"
-#include "absl/flags/declare.h"
 #include "rewriter/rewriter_interface.h"
 
 ABSL_DECLARE_FLAG(bool, enable_gru_rewriter);
 ABSL_DECLARE_FLAG(double, gru_score_weight);
+ABSL_DECLARE_FLAG(double, gru_katakana_penalty);
+ABSL_DECLARE_FLAG(double, gru_hiragana_penalty);
 ABSL_DECLARE_FLAG(std::string, gru_model_path);
 ABSL_DECLARE_FLAG(std::string, gru_chardata_path);
+ABSL_DECLARE_FLAG(std::string, gru_config_path);
 
 namespace gruscorer {
 class GruModel;
@@ -28,6 +33,13 @@ class CharIndex;
 }
 
 namespace mozc {
+
+struct GruPenaltyConfig {
+  double katakana_penalty = 500.0;
+  double hiragana_penalty = 300.0;
+  double emoji_penalty = 15000.0;
+  double alphabet_multiplier = 2.0;
+};
 
 class GruRewriter : public RewriterInterface {
  public:
@@ -48,21 +60,25 @@ class GruRewriter : public RewriterInterface {
       const ConversionRequest& request,
       const Segments& segments) const override;
 
-  // Explicitly initialize or reload models.
+  // Explicitly initialize or reload models and configurations.
   bool Reload() override;
 
  private:
   bool EnsureInitialized() const;
+  GruPenaltyConfig GetPenaltyConfig() const;
 
   mutable absl::Mutex mutex_;
   mutable std::unique_ptr<gruscorer::GruModel> model_ ABSL_GUARDED_BY(mutex_);
   mutable std::unique_ptr<charindex::CharIndex> indexer_ ABSL_GUARDED_BY(mutex_);
   mutable std::string loaded_model_path_ ABSL_GUARDED_BY(mutex_);
   mutable std::string loaded_chardata_path_ ABSL_GUARDED_BY(mutex_);
+  mutable std::string config_file_path_ ABSL_GUARDED_BY(mutex_);
+  mutable GruPenaltyConfig penalty_config_ ABSL_GUARDED_BY(mutex_);
+  mutable int64_t last_config_mtime_ ABSL_GUARDED_BY(mutex_) = 0;
+  mutable absl::Time last_config_check_time_ ABSL_GUARDED_BY(mutex_) = absl::InfinitePast();
   mutable bool is_initialized_ ABSL_GUARDED_BY(mutex_) = false;
 };
 
 }  // namespace mozc
 
 #endif  // MOZC_REWRITER_GRU_REWRITER_H_
-

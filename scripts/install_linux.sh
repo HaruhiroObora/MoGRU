@@ -192,6 +192,19 @@ if [ -f "$REPO_ROOT/models/grumodel.bin" ] && [ -f "$REPO_ROOT/models/chardata.b
   cp -f "$REPO_ROOT/models/chardata.bin" "$HOME/.mozc/"
 fi
 
+# Deploy default gru_config.ini if not already existing (preserve user customization)
+for conf_dir in "$HOME/.config/mozc" "$HOME/.mozc"; do
+  mkdir -p "$conf_dir"
+  if [ ! -f "$conf_dir/gru_config.ini" ]; then
+    if [ -f "$REPO_ROOT/models/gru_config.ini" ]; then
+      echo "[+] Initializing $conf_dir/gru_config.ini from default template ..."
+      cp "$REPO_ROOT/models/gru_config.ini" "$conf_dir/gru_config.ini"
+    fi
+  else
+    echo "[*] Preserving existing configuration: $conf_dir/gru_config.ini"
+  fi
+done
+
 # 6. Configure default Fcitx5 settings for MoGRU
 mkdir -p "$HOME/.config/fcitx5/conf"
 CONF_FILE="$HOME/.config/fcitx5/conf/mogru.conf"

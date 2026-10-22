@@ -71,7 +71,7 @@ echo "=== Step 2/3: Building Mozc Package (-c opt) ==="
 # 7. Install
 echo "=== Step 3/3: Installing MoGRU ==="
 
-# Copy GRU model files to user profile directory
+# Copy GRU model files and default configuration to user profile directory
 for dir in \
   "$HOME/Library/Application Support/Mozc" \
   "$HOME/Library/Application Support/Google/JapaneseInput" \
@@ -81,8 +81,12 @@ for dir in \
     cp -f "$REPO_ROOT/models/grumodel.bin" "$dir/"
     cp -f "$REPO_ROOT/models/chardata.bin" "$dir/"
   fi
+  if [ ! -f "$dir/gru_config.ini" ] && [ -f "$REPO_ROOT/models/gru_config.ini" ]; then
+    echo "[+] Initializing $dir/gru_config.ini from default template ..."
+    cp "$REPO_ROOT/models/gru_config.ini" "$dir/gru_config.ini"
+  fi
 done
-echo "[+] GRU model files installed to Application Support and ~/.config/mozc/"
+echo "[+] GRU model files and configuration installed to Application Support and ~/.config/mozc/"
 
 # If Mozc.pkg exists, install it
 if [ -f "$REPO_ROOT/src/bazel-bin/mac/Mozc.pkg" ]; then

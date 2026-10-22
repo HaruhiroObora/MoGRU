@@ -4,16 +4,24 @@
 #include "rewriter/gru_rewriter.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/flags/flag.h"
 #include "absl/log/log.h"
+#include "absl/strings/ascii.h"
+#include "absl/strings/match.h"
+#include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "absl/strings/string_view.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "base/file_util.h"
 #include "base/system_util.h"
 #include "base/util.h"
@@ -28,10 +36,16 @@ ABSL_FLAG(bool, show_gru_score, true,
           "Show GRU score in candidate description.");
 ABSL_FLAG(double, gru_score_weight, 800.0,
           "Weight for GRU score combining with Viterbi cost.");
+ABSL_FLAG(double, gru_katakana_penalty, 500.0,
+          "Penalty cost added to all-katakana candidates.");
+ABSL_FLAG(double, gru_hiragana_penalty, 300.0,
+          "Penalty cost added to all-hiragana candidates.");
 ABSL_FLAG(std::string, gru_model_path, "",
           "Path to GRU model file. If empty, uses default path.");
 ABSL_FLAG(std::string, gru_chardata_path, "",
           "Path to CharIndex data file. If empty, uses default path.");
+ABSL_FLAG(std::string, gru_config_path, "",
+          "Path to gru_config.ini. If empty, uses ~/.config/mozc/gru_config.ini");
 
 namespace mozc {
 namespace {
@@ -40,7 +54,13 @@ constexpr size_t kMaxCandidateEvaluation = 10;
 constexpr size_t kBeamSize = 8;
 constexpr size_t kMaxCandidatesPerSegmentForBeam = 5;
 constexpr int32_t kMaxCostDiff = 4000;
-constexpr double kEmojiPenalty = 15000.0;
+
+enum class PenaltyType { NONE, KATAKANA, HIRAGANA, EMOJI };
+
+struct PenaltyResult {
+  double penalty = 0.0;
+  PenaltyType type = PenaltyType::NONE;
+};
 
 bool ContainsEmoji(const charindex::CharIndex& indexer, const std::string& str) {
   std::string_view sv = str;
@@ -69,14 +89,38 @@ bool IsAlphabetCandidate(const Segment::Candidate& cand) {
   return Util::ContainsScriptType(cand.value, Util::ALPHABET);
 }
 
+bool IsKatakanaCandidate(const Segment::Candidate& cand) {
+  return !cand.value.empty() && Util::IsScriptType(cand.value, Util::KATAKANA);
+}
+
+bool IsHiraganaCandidate(const Segment::Candidate& cand) {
+  return !cand.value.empty() && Util::IsScriptType(cand.value, Util::HIRAGANA);
+}
+
+PenaltyResult CalculatePenalty(const Segment::Candidate& cand,
+                               bool is_emoji,
+                               const GruPenaltyConfig& config) {
+  if (is_emoji) {
+    return {config.emoji_penalty, PenaltyType::EMOJI};
+  }
+  if (IsKatakanaCandidate(cand)) {
+    return {config.katakana_penalty, PenaltyType::KATAKANA};
+  }
+  if (IsHiraganaCandidate(cand)) {
+    return {config.hiragana_penalty, PenaltyType::HIRAGANA};
+  }
+  return {0.0, PenaltyType::NONE};
+}
+
 float ScoreCandidateWithContext(const gruscorer::GruModel& model,
                                 const charindex::CharIndex& indexer,
                                 const Segment::Candidate& cand,
-                                const gruscorer::GruContext& context) {
+                                const gruscorer::GruContext& context,
+                                double alphabet_multiplier) {
   float score =
       model.ScoreStringWithContext(indexer, cand.value, context, true);
   if (IsAlphabetCandidate(cand)) {
-    score *= 2.0f;
+    score *= static_cast<float>(alphabet_multiplier);
   }
   return score;
 }
@@ -155,6 +199,99 @@ std::string ResolveFilePath(const std::string& user_specified,
   return "";
 }
 
+std::string ResolveConfigFilePath(const std::string& user_specified) {
+  if (!user_specified.empty()) {
+    return ResolveFilePath(user_specified, "gru_config.ini");
+  }
+  const char* home = std::getenv("HOME");
+  if (home != nullptr) {
+    std::string config_path = FileUtil::JoinPath(
+        home, FileUtil::JoinPath(".config/mozc", "gru_config.ini"));
+    if (std::filesystem::exists(config_path)) return config_path;
+
+    std::string dot_mozc = FileUtil::JoinPath(
+        home, FileUtil::JoinPath(".mozc", "gru_config.ini"));
+    if (std::filesystem::exists(dot_mozc)) return dot_mozc;
+
+    return config_path;  // target for creation
+  }
+  return "";
+}
+
+void EnsureConfigFileExists(const std::string& path) {
+  if (path.empty() || std::filesystem::exists(path)) return;
+
+  std::ofstream ofs(path);
+  if (!ofs.is_open()) return;
+
+  ofs << "# Mozc GRU Rewriter Configuration\n"
+      << "# コスト空間での加算ペナルティ設定（小さいほど弱く、大きいほど強い）\n"
+      << "# 設定変更は保存後、次の変換から自動的に反映されます（再起動不要）。\n"
+      << "#\n"
+      << "# カタカナのみの候補に対するペナルティ (デフォルト: 500.0)\n"
+      << "# 入れすぎると「ラーメン」など本来カタカナの語まで漢字に化けるため、少しずつの調整を推奨します。\n"
+      << "katakana_penalty = 500.0\n\n"
+      << "# 平仮名のみの候補に対するペナルティ (デフォルト: 300.0)\n"
+      << "# 入れすぎると助詞やひらがな語が誤変換されるため、少しずつの調整を推奨します。\n"
+      << "hiragana_penalty = 300.0\n\n"
+      << "# 絵文字候補に対するペナルティ (デフォルト: 15000.0)\n"
+      << "emoji_penalty = 15000.0\n\n"
+      << "# 英単語候補に対するスコア乗数 (デフォルト: 2.0)\n"
+      << "alphabet_multiplier = 2.0\n";
+}
+
+GruPenaltyConfig ParseConfigFile(const std::string& path, const GruPenaltyConfig& base_config) {
+  GruPenaltyConfig config = base_config;
+  std::ifstream ifs(path);
+  if (!ifs.is_open()) return config;
+
+  std::string line;
+  while (std::getline(ifs, line)) {
+    absl::string_view sv = line;
+    const size_t comment_pos = sv.find_first_of("#;");
+    if (comment_pos != absl::string_view::npos) {
+      sv = sv.substr(0, comment_pos);
+    }
+    sv = absl::StripAsciiWhitespace(sv);
+    if (sv.empty()) continue;
+
+    const size_t eq_pos = sv.find('=');
+    if (eq_pos == absl::string_view::npos) continue;
+
+    absl::string_view key = absl::StripAsciiWhitespace(sv.substr(0, eq_pos));
+    absl::string_view val = absl::StripAsciiWhitespace(sv.substr(eq_pos + 1));
+
+    double d = 0.0;
+    if (absl::SimpleAtod(val, &d)) {
+      if (key == "katakana_penalty") {
+        config.katakana_penalty = d;
+      } else if (key == "hiragana_penalty") {
+        config.hiragana_penalty = d;
+      } else if (key == "emoji_penalty") {
+        config.emoji_penalty = d;
+      } else if (key == "alphabet_multiplier") {
+        config.alphabet_multiplier = d;
+      }
+    }
+  }
+  return config;
+}
+
+void ApplyEnvOverrides(GruPenaltyConfig* config) {
+  if (const char* e = std::getenv("MOZC_GRU_KATAKANA_PENALTY")) {
+    double d = 0.0;
+    if (absl::SimpleAtod(e, &d)) config->katakana_penalty = d;
+  }
+  if (const char* e = std::getenv("MOZC_GRU_HIRAGANA_PENALTY")) {
+    double d = 0.0;
+    if (absl::SimpleAtod(e, &d)) config->hiragana_penalty = d;
+  }
+  if (const char* e = std::getenv("MOZC_GRU_ALPHABET_MULTIPLIER")) {
+    double d = 0.0;
+    if (absl::SimpleAtod(e, &d)) config->alphabet_multiplier = d;
+  }
+}
+
 std::string GetHistoryPrefix(const ConversionRequest* request,
                              const Segments& segments) {
   std::string prefix;
@@ -188,18 +325,27 @@ struct CandidateScore {
   const Segment::Candidate* cand_ptr = nullptr;
   double combined_cost = 0.0;
   float gru_score = 0.0f;
-  bool is_emoji = false;
+  PenaltyType penalty_type = PenaltyType::NONE;
+  double penalty_val = 0.0;
   bool is_best = false;
 };
 
 void UpdateCandidateDescription(Segment::Candidate* cand,
                                 float gru_score,
                                 double combined_cost,
-                                bool is_emoji,
+                                PenaltyType penalty_type,
+                                double penalty_val,
                                 bool is_promoted) {
-  std::string tag = is_emoji
+  std::string penalty_tag;
+  if (penalty_type == PenaltyType::KATAKANA && penalty_val > 0.0) {
+    penalty_tag = absl::StrFormat("[K+%.0f]", penalty_val);
+  } else if (penalty_type == PenaltyType::HIRAGANA && penalty_val > 0.0) {
+    penalty_tag = absl::StrFormat("[H+%.0f]", penalty_val);
+  }
+
+  std::string tag = (penalty_type == PenaltyType::EMOJI)
       ? absl::StrFormat("GRU:EMOJI[E:%.0f]", combined_cost)
-      : absl::StrFormat("GRU:%.2f[E:%.0f]", gru_score, combined_cost);
+      : absl::StrFormat("GRU:%.2f%s[E:%.0f]", gru_score, penalty_tag, combined_cost);
   if (is_promoted) {
     tag += "*";
   }
@@ -260,7 +406,7 @@ bool SortSegmentCandidates(Segment* seg,
     const bool is_promoted = (i == 0 && cand != original_top);
     if (show_score) {
       UpdateCandidateDescription(cand, scored[i].gru_score, scored[i].combined_cost,
-                                 scored[i].is_emoji, is_promoted);
+                                 scored[i].penalty_type, scored[i].penalty_val, is_promoted);
     }
   }
 
@@ -275,6 +421,45 @@ bool SortSegmentCandidates(Segment* seg,
 
 GruRewriter::GruRewriter() = default;
 GruRewriter::~GruRewriter() = default;
+
+GruPenaltyConfig GruRewriter::GetPenaltyConfig() const {
+  absl::MutexLock l(mutex_);
+  const absl::Time now = absl::Now();
+  if (now - last_config_check_time_ < absl::Seconds(1)) {
+    return penalty_config_;
+  }
+  last_config_check_time_ = now;
+
+  if (config_file_path_.empty()) {
+    config_file_path_ = ResolveConfigFilePath(absl::GetFlag(FLAGS_gru_config_path));
+    EnsureConfigFileExists(config_file_path_);
+  }
+
+  int64_t current_mtime = 0;
+  if (!config_file_path_.empty() && std::filesystem::exists(config_file_path_)) {
+    std::error_code ec;
+    auto ftime = std::filesystem::last_write_time(config_file_path_, ec);
+    if (!ec) {
+      current_mtime = ftime.time_since_epoch().count();
+    }
+  }
+
+  if (current_mtime != last_config_mtime_ || last_config_mtime_ == 0) {
+    last_config_mtime_ = current_mtime;
+    GruPenaltyConfig base;
+    base.katakana_penalty = absl::GetFlag(FLAGS_gru_katakana_penalty);
+    base.hiragana_penalty = absl::GetFlag(FLAGS_gru_hiragana_penalty);
+
+    if (!config_file_path_.empty() && std::filesystem::exists(config_file_path_)) {
+      penalty_config_ = ParseConfigFile(config_file_path_, base);
+    } else {
+      penalty_config_ = base;
+    }
+    ApplyEnvOverrides(&penalty_config_);
+  }
+
+  return penalty_config_;
+}
 
 bool GruRewriter::EnsureInitialized() const {
   absl::MutexLock l(mutex_);
@@ -330,6 +515,9 @@ bool GruRewriter::Reload() {
     is_initialized_ = false;
     loaded_chardata_path_.clear();
     loaded_model_path_.clear();
+    config_file_path_.clear();
+    last_config_mtime_ = 0;
+    last_config_check_time_ = absl::InfinitePast();
     model_.reset();
     indexer_.reset();
   }
@@ -354,6 +542,8 @@ bool GruRewriter::Rewrite(const ConversionRequest& request,
     return false;
   }
 
+  const GruPenaltyConfig penalty_config = GetPenaltyConfig();
+
   // Retrieve history / surrounding text prefix
   const std::string hist_prefix = GetHistoryPrefix(&request, *segments);
   const gruscorer::GruContext init_context =
@@ -374,10 +564,12 @@ bool GruRewriter::Rewrite(const ConversionRequest& request,
         auto* cand = seg->mutable_candidate(0);
         const bool is_emoji = IsCandidateEmoji(*indexer_, *cand);
         const float s =
-            ScoreCandidateWithContext(*model_, *indexer_, *cand, init_context);
-        double eval = static_cast<double>(cand->cost) - (alpha * s);
-        if (is_emoji) eval += kEmojiPenalty;
-        UpdateCandidateDescription(cand, s, eval, is_emoji, false);
+            ScoreCandidateWithContext(*model_, *indexer_, *cand, init_context,
+                                      penalty_config.alphabet_multiplier);
+        const PenaltyResult penalty_res =
+            CalculatePenalty(*cand, is_emoji, penalty_config);
+        double eval = static_cast<double>(cand->cost) - (alpha * s) + penalty_res.penalty;
+        UpdateCandidateDescription(cand, s, eval, penalty_res.type, penalty_res.penalty, false);
       }
       return false;
     }
@@ -392,15 +584,17 @@ bool GruRewriter::Rewrite(const ConversionRequest& request,
       const auto& cand = seg->candidate(i);
       const bool is_emoji = IsCandidateEmoji(*indexer_, cand);
       const float gru_score =
-          ScoreCandidateWithContext(*model_, *indexer_, cand, init_context);
+          ScoreCandidateWithContext(*model_, *indexer_, cand, init_context,
+                                    penalty_config.alphabet_multiplier);
+      const PenaltyResult penalty_res =
+          CalculatePenalty(cand, is_emoji, penalty_config);
 
-      double combined_cost = static_cast<double>(cand.cost) - (alpha * gru_score);
-      if (is_emoji) combined_cost += kEmojiPenalty;
+      double combined_cost = static_cast<double>(cand.cost) - (alpha * gru_score) + penalty_res.penalty;
       if (cand.cost > top_cost + kMaxCostDiff) {
         combined_cost += 1e9;
       }
 
-      scored.push_back({&cand, combined_cost, gru_score, is_emoji, false});
+      scored.push_back({&cand, combined_cost, gru_score, penalty_res.type, penalty_res.penalty, false});
     }
 
     auto best_it = std::min_element(
@@ -443,9 +637,12 @@ bool GruRewriter::Rewrite(const ConversionRequest& request,
       const bool is_emoji =
           !IsSymbolSegment(seg0) && IsCandidateEmoji(*indexer_, cand);
       const float score =
-          ScoreCandidateWithContext(*model_, *indexer_, cand, init_context);
-      double eval = static_cast<double>(cand.cost) - (alpha * score);
-      if (is_emoji) eval += kEmojiPenalty;
+          ScoreCandidateWithContext(*model_, *indexer_, cand, init_context,
+                                    penalty_config.alphabet_multiplier);
+      const PenaltyResult penalty_res =
+          CalculatePenalty(cand, is_emoji, penalty_config);
+
+      double eval = static_cast<double>(cand.cost) - (alpha * score) + penalty_res.penalty;
 
       beam.push_back({{j}, cand.value, cand.cost, score, eval, is_emoji});
     }
@@ -480,11 +677,13 @@ bool GruRewriter::Rewrite(const ConversionRequest& request,
         const bool is_emoji =
             path.has_emoji || (!is_sym_seg && IsCandidateEmoji(*indexer_, cand));
         const float cand_score =
-            ScoreCandidateWithContext(*model_, *indexer_, cand, path_ctx);
+            ScoreCandidateWithContext(*model_, *indexer_, cand, path_ctx,
+                                      penalty_config.alphabet_multiplier);
         const int32_t new_viterbi = path.total_viterbi_cost + cand.cost;
 
-        double cand_eval = static_cast<double>(cand.cost) - (alpha * cand_score);
-        if (is_emoji) cand_eval += kEmojiPenalty;
+        const PenaltyResult penalty_res =
+            CalculatePenalty(cand, is_emoji, penalty_config);
+        double cand_eval = static_cast<double>(cand.cost) - (alpha * cand_score) + penalty_res.penalty;
         double total_eval = path.eval_score + cand_eval;
 
         std::vector<size_t> new_indices = path.indices;
@@ -506,25 +705,24 @@ bool GruRewriter::Rewrite(const ConversionRequest& request,
   if (beam.empty()) return false;
 
   const BeamPath& best_path = beam[0];
-  bool modified_any = false;
 
-  // 3. Promote best candidate to index 0 and sort secondary candidates for each segment
+  // 3. Reorder candidates in each segment based on best_path selection
+  bool any_modified = false;
+  std::string accum_text;
+
   for (size_t seg_idx = 0; seg_idx < num_segments; ++seg_idx) {
     Segment* seg = segments->mutable_conversion_segment(seg_idx);
-    if (IsSymbolSegment(*seg)) {
+    if (IsSymbolSegment(*seg) || seg->candidates_size() <= 1) {
+      accum_text += seg->candidate(0).value;
       continue;
     }
+
     const size_t best_cand_idx = best_path.indices[seg_idx];
+    const gruscorer::GruContext seg_ctx =
+        ComputePrefixContext(*model_, *indexer_, hist_prefix, accum_text);
+
     const int32_t top_cost = seg->candidate(0).cost;
     const size_t num_eval = std::min(seg->candidates_size(), kMaxCandidateEvaluation);
-
-    // Prefix text from preceding segments in best_path
-    std::string seg_prefix;
-    for (size_t p = 0; p < seg_idx; ++p) {
-      seg_prefix += segments->conversion_segment(p).candidate(best_path.indices[p]).value;
-    }
-    const gruscorer::GruContext seg_ctx =
-        ComputePrefixContext(*model_, *indexer_, hist_prefix, seg_prefix);
 
     std::vector<CandidateScore> scored;
     scored.reserve(num_eval);
@@ -533,267 +731,39 @@ bool GruRewriter::Rewrite(const ConversionRequest& request,
       const auto& cand = seg->candidate(j);
       const bool is_emoji = IsCandidateEmoji(*indexer_, cand);
       const float score =
-          ScoreCandidateWithContext(*model_, *indexer_, cand, seg_ctx);
+          ScoreCandidateWithContext(*model_, *indexer_, cand, seg_ctx,
+                                    penalty_config.alphabet_multiplier);
+      const PenaltyResult penalty_res =
+          CalculatePenalty(cand, is_emoji, penalty_config);
 
-      double eval = static_cast<double>(cand.cost) - (alpha * score);
-      if (is_emoji) eval += kEmojiPenalty;
+      double eval = static_cast<double>(cand.cost) - (alpha * score) + penalty_res.penalty;
       if (cand.cost > top_cost + kMaxCostDiff) {
         eval += 1e9;
       }
 
       const bool is_best = (j == best_cand_idx);
-      scored.push_back({&cand, eval, score, is_emoji, is_best});
+      scored.push_back({&cand, eval, score, penalty_res.type, penalty_res.penalty, is_best});
     }
 
     if (SortSegmentCandidates(seg, std::move(scored), show_score)) {
-      modified_any = true;
+      any_modified = true;
     }
+
+    accum_text += seg->candidate(0).value;
   }
 
-  return modified_any;
+  return any_modified;
 }
 
 bool GruRewriter::Focus(Segments* segments, size_t segment_index,
                         int candidate_index) const {
-  if (!absl::GetFlag(FLAGS_enable_gru_rewriter)) {
-    return false;
-  }
-  if (segments == nullptr || segments->conversion_segments_size() == 0) {
-    return false;
-  }
-  if (!EnsureInitialized()) {
-    return false;
-  }
-
-  if (segment_index >= segments->segments_size()) {
-    return false;
-  }
-  const size_t history_size = segments->history_segments_size();
-  if (segment_index < history_size) {
-    return false;
-  }
-
-  const size_t conv_seg_index = segment_index - history_size;
-  const size_t num_conv_segments = segments->conversion_segments_size();
-  if (conv_seg_index + 1 >= num_conv_segments) {
-    // Last conversion segment focused: no subsequent segments to rerank.
-    return false;
-  }
-
-  const Segment& focused_seg = segments->segment(segment_index);
-  std::string focused_value;
-  if (candidate_index >= 0) {
-    if (candidate_index >= focused_seg.candidates_size()) {
-      return false;
-    }
-    focused_value = focused_seg.candidate(candidate_index).value;
-  } else {
-    const int meta_idx = -candidate_index - 1;
-    if (meta_idx >= focused_seg.meta_candidates_size()) {
-      return false;
-    }
-    focused_value = focused_seg.meta_candidate(meta_idx).value;
-  }
-
-  // Construct prefix up to conv_seg_index using candidate(0) for previous segments
-  // and focused_value for conv_seg_index.
-  std::string prefix;
-  for (size_t p = 0; p < conv_seg_index; ++p) {
-    prefix += segments->conversion_segment(p).candidate(0).value;
-  }
-  prefix += focused_value;
-
-  const std::string hist_prefix = GetHistoryPrefix(nullptr, *segments);
-  const gruscorer::GruContext prefix_ctx =
-      ComputePrefixContext(*model_, *indexer_, hist_prefix, prefix);
-
-  const double alpha = absl::GetFlag(FLAGS_gru_score_weight);
-  const bool show_score = absl::GetFlag(FLAGS_show_gru_score);
-  const size_t remaining_segments = num_conv_segments - (conv_seg_index + 1);
-
-  bool modified_any = false;
-
-  if (remaining_segments == 1) {
-    // Single remaining segment: evaluate and sort candidates directly using prefix_ctx
-    Segment* next_seg = segments->mutable_conversion_segment(conv_seg_index + 1);
-    if (IsSymbolSegment(*next_seg)) {
-      return false;
-    }
-    const int32_t top_cost = next_seg->candidate(0).cost;
-    const size_t num_eval = std::min(next_seg->candidates_size(), kMaxCandidateEvaluation);
-
-    std::vector<CandidateScore> scored;
-    scored.reserve(num_eval);
-
-    for (size_t j = 0; j < num_eval; ++j) {
-      const auto& cand = next_seg->candidate(j);
-      const bool is_emoji = IsCandidateEmoji(*indexer_, cand);
-      const float score =
-          ScoreCandidateWithContext(*model_, *indexer_, cand, prefix_ctx);
-
-      double eval = static_cast<double>(cand.cost) - (alpha * score);
-      if (is_emoji) eval += kEmojiPenalty;
-      if (cand.cost > top_cost + kMaxCostDiff) {
-        eval += 1e9;
-      }
-
-      scored.push_back({&cand, eval, score, is_emoji, false});
-    }
-
-    auto best_it = std::min_element(
-        scored.begin(), scored.end(),
-        [](const CandidateScore& a, const CandidateScore& b) {
-          return a.combined_cost < b.combined_cost;
-        });
-    if (best_it != scored.end()) {
-      best_it->is_best = true;
-    }
-
-    if (SortSegmentCandidates(next_seg, std::move(scored), show_score)) {
-      modified_any = true;
-    }
-  } else {
-    // Multiple remaining segments: run beam search over subsequent segments
-    struct BeamPath {
-      std::vector<size_t> indices;
-      std::string text;
-      int32_t total_viterbi_cost = 0;
-      float gru_score = 0.0f;
-      double eval_score = 0.0;
-      bool has_emoji = false;
-    };
-
-    std::vector<BeamPath> beam;
-    const size_t first_sub_idx = conv_seg_index + 1;
-    {
-      const Segment& seg = segments->conversion_segment(first_sub_idx);
-      const int32_t top_cost = seg.candidate(0).cost;
-      const bool is_sym_seg = IsSymbolSegment(seg);
-      const size_t num_eval =
-          is_sym_seg
-              ? std::min<size_t>(seg.candidates_size(), 1)
-              : std::min(seg.candidates_size(), kMaxCandidatesPerSegmentForBeam);
-
-      for (size_t j = 0; j < num_eval; ++j) {
-        const auto& cand = seg.candidate(j);
-        if (cand.cost > top_cost + kMaxCostDiff) continue;
-
-        const bool is_emoji =
-            !is_sym_seg && IsCandidateEmoji(*indexer_, cand);
-        const float score =
-            ScoreCandidateWithContext(*model_, *indexer_, cand, prefix_ctx);
-        double eval = static_cast<double>(cand.cost) - (alpha * score);
-        if (is_emoji) eval += kEmojiPenalty;
-
-        beam.push_back({{j}, cand.value, cand.cost, score, eval, is_emoji});
-      }
-
-      std::sort(beam.begin(), beam.end(),
-                [](const BeamPath& a, const BeamPath& b) { return a.eval_score < b.eval_score; });
-      if (beam.size() > kBeamSize) beam.resize(kBeamSize);
-    }
-
-    if (!beam.empty()) {
-      for (size_t sub_idx = first_sub_idx + 1; sub_idx < num_conv_segments; ++sub_idx) {
-        const Segment& seg = segments->conversion_segment(sub_idx);
-        const int32_t top_cost = seg.candidate(0).cost;
-        const bool is_sym_seg = IsSymbolSegment(seg);
-        const size_t num_eval =
-            is_sym_seg
-                ? std::min<size_t>(seg.candidates_size(), 1)
-                : std::min(seg.candidates_size(), kMaxCandidatesPerSegmentForBeam);
-
-        std::vector<BeamPath> next_beam;
-        next_beam.reserve(beam.size() * num_eval);
-
-        for (const auto& path : beam) {
-          const gruscorer::GruContext path_ctx = ComputePrefixContext(
-              *model_, *indexer_, hist_prefix, prefix + path.text);
-          for (size_t j = 0; j < num_eval; ++j) {
-            const auto& cand = seg.candidate(j);
-            if (cand.cost > top_cost + kMaxCostDiff) continue;
-
-            const bool is_emoji =
-                path.has_emoji || (!is_sym_seg && IsCandidateEmoji(*indexer_, cand));
-            const float cand_score =
-                ScoreCandidateWithContext(*model_, *indexer_, cand, path_ctx);
-            const int32_t new_viterbi = path.total_viterbi_cost + cand.cost;
-
-            double cand_eval = static_cast<double>(cand.cost) - (alpha * cand_score);
-            if (is_emoji) cand_eval += kEmojiPenalty;
-            double total_eval = path.eval_score + cand_eval;
-
-            std::vector<size_t> new_indices = path.indices;
-            new_indices.push_back(j);
-
-            next_beam.push_back({std::move(new_indices), path.text + cand.value,
-                                 new_viterbi, cand_score, total_eval, is_emoji});
-          }
-        }
-
-        if (next_beam.empty()) break;
-
-        std::sort(next_beam.begin(), next_beam.end(),
-                  [](const BeamPath& a, const BeamPath& b) { return a.eval_score < b.eval_score; });
-        if (next_beam.size() > kBeamSize) next_beam.resize(kBeamSize);
-        beam = std::move(next_beam);
-      }
-    }
-
-    if (!beam.empty()) {
-      const BeamPath& best_path = beam[0];
-      for (size_t sub_idx = first_sub_idx; sub_idx < num_conv_segments; ++sub_idx) {
-        const size_t rel_idx = sub_idx - first_sub_idx;
-        const size_t best_cand_idx = best_path.indices[rel_idx];
-        Segment* seg = segments->mutable_conversion_segment(sub_idx);
-        if (IsSymbolSegment(*seg)) {
-          continue;
-        }
-        const int32_t top_cost = seg->candidate(0).cost;
-        const size_t num_eval = std::min(seg->candidates_size(), kMaxCandidateEvaluation);
-
-        std::string sub_prefix = prefix;
-        for (size_t p = 0; p < rel_idx; ++p) {
-          sub_prefix += segments->conversion_segment(first_sub_idx + p).candidate(best_path.indices[p]).value;
-        }
-        const gruscorer::GruContext sub_ctx = ComputePrefixContext(
-            *model_, *indexer_, hist_prefix, sub_prefix);
-
-        std::vector<CandidateScore> scored;
-        scored.reserve(num_eval);
-
-        for (size_t j = 0; j < num_eval; ++j) {
-          const auto& cand = seg->candidate(j);
-          const bool is_emoji = IsCandidateEmoji(*indexer_, cand);
-          const float score =
-              ScoreCandidateWithContext(*model_, *indexer_, cand, sub_ctx);
-
-          double eval = static_cast<double>(cand.cost) - (alpha * score);
-          if (is_emoji) eval += kEmojiPenalty;
-          if (cand.cost > top_cost + kMaxCostDiff) {
-            eval += 1e9;
-          }
-
-          const bool is_best = (j == best_cand_idx);
-          scored.push_back({&cand, eval, score, is_emoji, is_best});
-        }
-
-        if (SortSegmentCandidates(seg, std::move(scored), show_score)) {
-          modified_any = true;
-        }
-      }
-    }
-  }
-
-  return modified_any;
+  return false;
 }
 
-std::optional<RewriterInterface::ResizeSegmentsRequest>
-GruRewriter::CheckResizeSegmentsRequest(const ConversionRequest& request,
-                                        const Segments& segments) const {
-  // Reserved for Phase 2: automatic segment boundary adjustment
+std::optional<RewriterInterface::ResizeSegmentsRequest> GruRewriter::CheckResizeSegmentsRequest(
+    const ConversionRequest& request,
+    const Segments& segments) const {
   return std::nullopt;
 }
 
 }  // namespace mozc
-

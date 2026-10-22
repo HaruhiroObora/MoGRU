@@ -88,6 +88,13 @@ if ((Test-Path $ModelSrc) -and (Test-Path $ChardataSrc)) {
     Copy-Item -Path $ChardataSrc -Destination $ModelDestDir -Force
 }
 
+$ConfigSrc = Join-Path $RepoRoot "models\gru_config.ini"
+$ConfigDest = Join-Path $ModelDestDir "gru_config.ini"
+if ((Test-Path $ConfigSrc) -and (-not (Test-Path $ConfigDest))) {
+    Write-Host "[+] Initializing $ConfigDest from default template ..." -ForegroundColor Green
+    Copy-Item -Path $ConfigSrc -Destination $ConfigDest -Force
+}
+
 Write-Host "=== Installation Complete! ===" -ForegroundColor Green
 Write-Host "MoGRU (Mozc with GRU Language Model) is now installed on Windows."
 Write-Host "You can switch to MoGRU using Windows Key + Space."
