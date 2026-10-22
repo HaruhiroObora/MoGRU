@@ -41,10 +41,10 @@ ABSL_FLAG(bool, show_gru_score, true,
           "Show GRU score in candidate description.");
 ABSL_FLAG(double, gru_score_weight, 800.0,
           "Weight for GRU score combining with Viterbi cost.");
-ABSL_FLAG(double, gru_katakana_penalty, 500.0,
-          "Penalty cost added to all-katakana candidates.");
-ABSL_FLAG(double, gru_hiragana_penalty, 300.0,
-          "Penalty cost added to all-hiragana candidates.");
+ABSL_FLAG(double, gru_katakana_multiplier, 1.3,
+          "Score multiplier for all-katakana candidates (>= 1.0 penalizes).");
+ABSL_FLAG(double, gru_hiragana_multiplier, 1.1,
+          "Score multiplier for all-hiragana candidates (>= 1.0 penalizes).");
 ABSL_FLAG(std::string, gru_model_path, "",
           "Path to GRU model file. If empty, uses default path.");
 ABSL_FLAG(std::string, gru_chardata_path, "",
@@ -108,12 +108,6 @@ PenaltyResult CalculatePenalty(const Segment::Candidate& cand,
   if (is_emoji) {
     return {config.emoji_penalty, PenaltyType::EMOJI};
   }
-  if (IsKatakanaCandidate(cand)) {
-    return {config.katakana_penalty, PenaltyType::KATAKANA};
-  }
-  if (IsHiraganaCandidate(cand)) {
-    return {config.hiragana_penalty, PenaltyType::HIRAGANA};
-  }
   return {0.0, PenaltyType::NONE};
 }
 
@@ -121,11 +115,15 @@ float ScoreCandidateWithContext(const gruscorer::GruModel& model,
                                 const charindex::CharIndex& indexer,
                                 const Segment::Candidate& cand,
                                 const gruscorer::GruContext& context,
-                                double alphabet_multiplier) {
+                                const GruPenaltyConfig& config) {
   float score =
       model.ScoreStringWithContext(indexer, cand.value, context, true);
   if (IsAlphabetCandidate(cand)) {
-    score *= static_cast<float>(alphabet_multiplier);
+    score *= static_cast<float>(config.alphabet_multiplier);
+  } else if (IsKatakanaCandidate(cand)) {
+    score *= static_cast<float>(config.katakana_multiplier);
+  } else if (IsHiraganaCandidate(cand)) {
+    score *= static_cast<float>(config.hiragana_multiplier);
   }
   return score;
 }
@@ -223,36 +221,97 @@ std::string ResolveConfigFilePath(const std::string& user_specified) {
   return "";
 }
 
+constexpr absl::string_view kDefaultConfigTemplate =
+    "# ==============================================================================\n"
+    "# Mozc GRU 言語モデル リライター 設定ファイル\n"
+    "# ==============================================================================\n"
+    "# このファイルの設定値を変更・保存すると、Fcitx5 や Mozc の再起動なしで\n"
+    "# 次の日本語変換から自動的に反映されます（ホットリロード対応）。\n"
+    "# ==============================================================================\n"
+    "\n"
+    "# 【カタカナのみの候補に対するスコア乗数】 (初期値: 1.3)\n"
+    "# - GRU の対数尤度スコア（負値）に乗算されます。\n"
+    "# - 1.0 = 補正なし（素の言語モデルスコア）\n"
+    "# - 1.0 より大きい値（例: 1.3, 1.5）: コストが増加し、カタカナ候補が抑制されます。\n"
+    "#   確信度が高いカタカナ語（例:「ラーメン」）は抑制が小さく、不自然なカタカナ候補は強く抑制されます。\n"
+    "# - 1.0 より小さい値（例: 0.8）: コストが減少し、カタカナ候補が優先（ブースト）されます。\n"
+    "katakana_multiplier = 1.3\n"
+    "\n"
+    "# 【平仮名のみの候補に対するスコア乗数】 (初期値: 1.1)\n"
+    "# - 漢字変換できる語で、ひらがなのまま確定するのを防ぎたい場合に有効です。\n"
+    "# - 1.0 = 補正なし\n"
+    "# - 1.0 より大きい値（例: 1.1, 1.3）: 平仮名候補が抑制されます。\n"
+    "# - 注意: 値を大きくしすぎると、助詞や平仮名表記の語が変換されにくくなるため微調整を推奨します。\n"
+    "hiragana_multiplier = 1.1\n"
+    "\n"
+    "# 【絵文字候補に対するペナルティ】 (初期値: 15000.0)\n"
+    "# - 文脈予測で絵文字が上位に割り込んでくるのを防ぐための固定加算コストです。\n"
+    "emoji_penalty = 15000.0\n"
+    "\n"
+    "# 【英単語候補に対するスコア乗数】 (初期値: 2.0)\n"
+    "# - 「とうきょう」に「TOKYO」や「Tokyo」が誤って第1候補に昇格するのを防ぎます。\n"
+    "# - 負の対数尤度スコアを乗算（2.0 = コスト実質2倍加算）します。\n"
+    "alphabet_multiplier = 2.0\n"
+    "\n"
+    "# 【文節区切り再編成（Resegmentation）の有効化】 (初期値: true)\n"
+    "# - GRU 言語モデルの文全体スコアを用いて、より自然な文節区切り位置へ自動変更します。\n"
+    "# - true: 有効, false: 無効（従来の Viterbi による固定区切りを使用）\n"
+    "enable_resegmentation = true\n"
+    "\n"
+    "# 【文節区切りを変更するための最小コスト改善閾値】 (初期値: 600.0)\n"
+    "# - 別の文節区切りパターンのスコアが、デフォルトの区切りよりこの値以上改善した場合のみ区切りを変更します。\n"
+    "# - 値を小さくする（例: 300）と積極的に区切りを変更し、大きくする（例: 1000）と慎重になります。\n"
+    "resegment_threshold = 600.0\n";
+
 void EnsureConfigFileExists(const std::string& path) {
-  if (path.empty() || std::filesystem::exists(path)) return;
+  if (path.empty()) return;
 
-  std::ofstream ofs(path);
-  if (!ofs.is_open()) return;
+  if (!std::filesystem::exists(path)) {
+    std::ofstream ofs(path);
+    if (!ofs.is_open()) return;
+    ofs << kDefaultConfigTemplate;
+    return;
+  }
 
-  ofs << "# Mozc GRU Rewriter Configuration\n"
-      << "# コスト空間での加算ペナルティ設定（小さいほど弱く、大きいほど強い）\n"
-      << "# 設定変更は保存後、次の変換から自動的に反映されます（再起動不要）。\n"
-      << "#\n"
-      << "# カタカナのみの候補に対するペナルティ (デフォルト: 500.0)\n"
-      << "# 入れすぎると「ラーメン」など本来カタカナの語まで漢字に化けるため、少しずつの調整を推奨します。\n"
-      << "katakana_penalty = 500.0\n\n"
-      << "# 平仮名のみの候補に対するペナルティ (デフォルト: 300.0)\n"
-      << "# 入れすぎると助詞やひらがな語が誤変換されるため、少しずつの調整を推奨します。\n"
-      << "hiragana_penalty = 300.0\n\n"
-      << "# 絵文字候補に対するペナルティ (デフォルト: 15000.0)\n"
-      << "emoji_penalty = 15000.0\n\n"
-      << "# 英単語候補に対するスコア乗数 (デフォルト: 2.0)\n"
-      << "alphabet_multiplier = 2.0\n\n"
-      << "# 文節区切り再編成（Resegmentation）の有効化 (true/false, デフォルト: true)\n"
-      << "enable_resegmentation = true\n\n"
-      << "# 文節区切りを変更するための最小コスト改善閾値 (デフォルト: 600.0)\n"
-      << "resegment_threshold = 600.0\n";
+  // Check if existing file needs upgrade (e.g. contains legacy keys or lacks new keys)
+  std::ifstream ifs(path);
+  if (!ifs.is_open()) return;
+  std::string content((std::istreambuf_iterator<char>(ifs)),
+                      std::istreambuf_iterator<char>());
+  ifs.close();
+
+  const bool has_new_katakana =
+      (content.find("katakana_multiplier") != std::string::npos);
+  const bool has_new_hiragana =
+      (content.find("hiragana_multiplier") != std::string::npos);
+  const bool has_resegment =
+      (content.find("enable_resegmentation") != std::string::npos);
+
+  if (!has_new_katakana || !has_new_hiragana || !has_resegment) {
+    std::error_code ec;
+    std::filesystem::copy_file(
+        path, path + ".bak",
+        std::filesystem::copy_options::overwrite_existing, ec);
+
+    std::ofstream ofs(path, std::ios::trunc);
+    if (ofs.is_open()) {
+      ofs << kDefaultConfigTemplate;
+      LOG(INFO) << "GruRewriter: Upgraded config file to new format: " << path;
+    }
+  }
 }
 
 GruPenaltyConfig ParseConfigFile(const std::string& path, const GruPenaltyConfig& base_config) {
   GruPenaltyConfig config = base_config;
   std::ifstream ifs(path);
   if (!ifs.is_open()) return config;
+
+  bool has_katakana_mult = false;
+  bool has_hiragana_mult = false;
+  double legacy_katakana_penalty = 0.0;
+  bool has_legacy_katakana_penalty = false;
+  double legacy_hiragana_penalty = 0.0;
+  bool has_legacy_hiragana_penalty = false;
 
   std::string line;
   while (std::getline(ifs, line)) {
@@ -272,10 +331,18 @@ GruPenaltyConfig ParseConfigFile(const std::string& path, const GruPenaltyConfig
 
     double d = 0.0;
     if (absl::SimpleAtod(val, &d)) {
-      if (key == "katakana_penalty") {
-        config.katakana_penalty = d;
+      if (key == "katakana_multiplier") {
+        config.katakana_multiplier = d;
+        has_katakana_mult = true;
+      } else if (key == "hiragana_multiplier") {
+        config.hiragana_multiplier = d;
+        has_hiragana_mult = true;
+      } else if (key == "katakana_penalty") {
+        legacy_katakana_penalty = d;
+        has_legacy_katakana_penalty = true;
       } else if (key == "hiragana_penalty") {
-        config.hiragana_penalty = d;
+        legacy_hiragana_penalty = d;
+        has_legacy_hiragana_penalty = true;
       } else if (key == "emoji_penalty") {
         config.emoji_penalty = d;
       } else if (key == "alphabet_multiplier") {
@@ -290,17 +357,26 @@ GruPenaltyConfig ParseConfigFile(const std::string& path, const GruPenaltyConfig
       }
     }
   }
+
+  // Fallback for legacy configuration
+  if (!has_katakana_mult && has_legacy_katakana_penalty) {
+    config.katakana_multiplier = 1.0 + (legacy_katakana_penalty / 1600.0);
+  }
+  if (!has_hiragana_mult && has_legacy_hiragana_penalty) {
+    config.hiragana_multiplier = 1.0 + (legacy_hiragana_penalty / 3000.0);
+  }
+
   return config;
 }
 
 void ApplyEnvOverrides(GruPenaltyConfig* config) {
-  if (const char* e = std::getenv("MOZC_GRU_KATAKANA_PENALTY")) {
+  if (const char* e = std::getenv("MOZC_GRU_KATAKANA_MULTIPLIER")) {
     double d = 0.0;
-    if (absl::SimpleAtod(e, &d)) config->katakana_penalty = d;
+    if (absl::SimpleAtod(e, &d)) config->katakana_multiplier = d;
   }
-  if (const char* e = std::getenv("MOZC_GRU_HIRAGANA_PENALTY")) {
+  if (const char* e = std::getenv("MOZC_GRU_HIRAGANA_MULTIPLIER")) {
     double d = 0.0;
-    if (absl::SimpleAtod(e, &d)) config->hiragana_penalty = d;
+    if (absl::SimpleAtod(e, &d)) config->hiragana_multiplier = d;
   }
   if (const char* e = std::getenv("MOZC_GRU_ALPHABET_MULTIPLIER")) {
     double d = 0.0;
@@ -472,14 +548,26 @@ GruPenaltyConfig GruRewriter::GetPenaltyConfig() const {
   if (current_mtime != last_config_mtime_ || last_config_mtime_ == 0) {
     last_config_mtime_ = current_mtime;
     GruPenaltyConfig base;
-    base.katakana_penalty = absl::GetFlag(FLAGS_gru_katakana_penalty);
-    base.hiragana_penalty = absl::GetFlag(FLAGS_gru_hiragana_penalty);
+    base.katakana_multiplier = absl::GetFlag(FLAGS_gru_katakana_multiplier);
+    base.hiragana_multiplier = absl::GetFlag(FLAGS_gru_hiragana_multiplier);
     base.enable_resegmentation = absl::GetFlag(FLAGS_enable_gru_resegmentation);
     base.resegment_threshold =
         static_cast<double>(absl::GetFlag(FLAGS_gru_resegment_cost_threshold));
 
     if (!config_file_path_.empty() && std::filesystem::exists(config_file_path_)) {
       penalty_config_ = ParseConfigFile(config_file_path_, base);
+      LOG(INFO) << "GruRewriter: Hot-reloaded configuration from "
+                << config_file_path_ << ": katakana_multiplier="
+                << penalty_config_.katakana_multiplier
+                << ", hiragana_multiplier="
+                << penalty_config_.hiragana_multiplier
+                << ", alphabet_multiplier="
+                << penalty_config_.alphabet_multiplier
+                << ", emoji_penalty=" << penalty_config_.emoji_penalty
+                << ", enable_resegmentation="
+                << penalty_config_.enable_resegmentation
+                << ", resegment_threshold="
+                << penalty_config_.resegment_threshold;
     } else {
       penalty_config_ = base;
     }
@@ -611,7 +699,7 @@ bool GruRewriter::RerankSegmentsWithBeamSearch(
         const bool is_emoji = IsCandidateEmoji(*indexer_, *cand);
         const float s =
             ScoreCandidateWithContext(*model_, *indexer_, *cand, init_context,
-                                      penalty_config.alphabet_multiplier);
+                                      penalty_config);
         const PenaltyResult penalty_res =
             CalculatePenalty(*cand, is_emoji, penalty_config);
         double eval = static_cast<double>(cand->cost) - (alpha * s) + penalty_res.penalty;
@@ -631,7 +719,7 @@ bool GruRewriter::RerankSegmentsWithBeamSearch(
       const bool is_emoji = IsCandidateEmoji(*indexer_, cand);
       const float gru_score =
           ScoreCandidateWithContext(*model_, *indexer_, cand, init_context,
-                                    penalty_config.alphabet_multiplier);
+                                    penalty_config);
       const PenaltyResult penalty_res =
           CalculatePenalty(cand, is_emoji, penalty_config);
 
@@ -689,7 +777,7 @@ bool GruRewriter::RerankSegmentsWithBeamSearch(
           !IsSymbolSegment(seg0) && IsCandidateEmoji(*indexer_, cand);
       const float score =
           ScoreCandidateWithContext(*model_, *indexer_, cand, init_context,
-                                    penalty_config.alphabet_multiplier);
+                                    penalty_config);
       const PenaltyResult penalty_res =
           CalculatePenalty(cand, is_emoji, penalty_config);
 
@@ -730,7 +818,7 @@ bool GruRewriter::RerankSegmentsWithBeamSearch(
             path.has_emoji || (!is_sym_seg && IsCandidateEmoji(*indexer_, cand));
         const float cand_score =
             ScoreCandidateWithContext(*model_, *indexer_, cand, path_ctx,
-                                      penalty_config.alphabet_multiplier);
+                                      penalty_config);
         const int32_t new_viterbi = path.total_viterbi_cost + cand.cost;
 
         const PenaltyResult penalty_res =
@@ -787,7 +875,7 @@ bool GruRewriter::RerankSegmentsWithBeamSearch(
       const bool is_emoji = IsCandidateEmoji(*indexer_, cand);
       const float score =
           ScoreCandidateWithContext(*model_, *indexer_, cand, seg_ctx,
-                                    penalty_config.alphabet_multiplier);
+                                    penalty_config);
       const PenaltyResult penalty_res =
           CalculatePenalty(cand, is_emoji, penalty_config);
 
@@ -1031,7 +1119,7 @@ std::optional<GruRewriter::ResegmentResult> GruRewriter::EvaluateResegmentation(
     const bool is_emoji = IsCandidateEmoji(*indexer_, default_cand);
     const float score = ScoreCandidateWithContext(
         *model_, *indexer_, default_cand, init_context,
-        penalty_config.alphabet_multiplier);
+        penalty_config);
     const PenaltyResult penalty_res =
         CalculatePenalty(default_cand, is_emoji, penalty_config);
     default_eval_score = static_cast<double>(default_cand.cost) -
@@ -1059,7 +1147,7 @@ std::optional<GruRewriter::ResegmentResult> GruRewriter::EvaluateResegmentation(
     const bool is_emoji = IsCandidateEmoji(*indexer_, cand);
     const float score = ScoreCandidateWithContext(
         *model_, *indexer_, cand, init_context,
-        penalty_config.alphabet_multiplier);
+        penalty_config);
     const PenaltyResult penalty_res =
         CalculatePenalty(cand, is_emoji, penalty_config);
     const double eval_score =

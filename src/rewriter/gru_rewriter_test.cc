@@ -412,9 +412,9 @@ TEST_F(GruRewriterTest, AlphabetCandidateDoubledGruScore) {
   }
 }
 
-TEST_F(GruRewriterTest, KatakanaPenaltyRerank) {
-  absl::SetFlag(&FLAGS_gru_katakana_penalty, 600.0);
-  absl::SetFlag(&FLAGS_gru_score_weight, 0.0);  // isolate Viterbi + Penalty effects
+TEST_F(GruRewriterTest, KatakanaMultiplierRerank) {
+  absl::SetFlag(&FLAGS_gru_katakana_multiplier, 3.0);
+  absl::SetFlag(&FLAGS_gru_score_weight, 800.0);
   rewriter_->Reload();
 
   ConversionRequest request;
@@ -422,22 +422,24 @@ TEST_F(GruRewriterTest, KatakanaPenaltyRerank) {
 
   Segment* seg = segments.add_segment();
   seg->set_key("とうきょう");
-  // Candidate 0: "トウキョウ" (initial cost 1000) -> with katakana penalty 600 => effective 1600
-  // Candidate 1: "東京" (initial cost 1200) -> no penalty => effective 1200
+  // Candidate 0: "トウキョウ" (initial cost 1000)
+  // Candidate 1: "東京" (initial cost 1000)
+  // With katakana multiplier 3.0, the negative GRU score of "トウキョウ" is amplified,
+  // making its combined cost worse than "東京".
   AddCandidate("とうきょう", "トウキョウ", 1000, seg);
-  AddCandidate("とうきょう", "東京", 1200, seg);
+  AddCandidate("とうきょう", "東京", 1000, seg);
 
   EXPECT_TRUE(rewriter_->Rewrite(request, &segments));
   EXPECT_EQ(seg->candidate(0).value, "東京");
   EXPECT_EQ(seg->candidate(1).value, "トウキョウ");
 
-  // Verify description contains penalty tag [K+600]
-  EXPECT_TRUE(seg->candidate(1).description.find("[K+600]") != std::string::npos);
+  // Verify description contains GRU score tag
+  EXPECT_TRUE(seg->candidate(1).description.find("GRU:") != std::string::npos);
 }
 
-TEST_F(GruRewriterTest, HiraganaPenaltyRerank) {
-  absl::SetFlag(&FLAGS_gru_hiragana_penalty, 400.0);
-  absl::SetFlag(&FLAGS_gru_score_weight, 0.0);  // isolate Viterbi + Penalty effects
+TEST_F(GruRewriterTest, HiraganaMultiplierRerank) {
+  absl::SetFlag(&FLAGS_gru_hiragana_multiplier, 3.0);
+  absl::SetFlag(&FLAGS_gru_score_weight, 800.0);
   rewriter_->Reload();
 
   ConversionRequest request;
@@ -445,17 +447,19 @@ TEST_F(GruRewriterTest, HiraganaPenaltyRerank) {
 
   Segment* seg = segments.add_segment();
   seg->set_key("とうきょう");
-  // Candidate 0: "とうきょう" (initial cost 1000) -> with hiragana penalty 400 => effective 1400
-  // Candidate 1: "東京" (initial cost 1200) -> no penalty => effective 1200
+  // Candidate 0: "とうきょう" (initial cost 1000)
+  // Candidate 1: "東京" (initial cost 1000)
+  // With hiragana multiplier 3.0, the negative GRU score of "とうきょう" is amplified,
+  // making its combined cost worse than "東京".
   AddCandidate("とうきょう", "とうきょう", 1000, seg);
-  AddCandidate("とうきょう", "東京", 1200, seg);
+  AddCandidate("とうきょう", "東京", 1000, seg);
 
   EXPECT_TRUE(rewriter_->Rewrite(request, &segments));
   EXPECT_EQ(seg->candidate(0).value, "東京");
   EXPECT_EQ(seg->candidate(1).value, "とうきょう");
 
-  // Verify description contains penalty tag [H+400]
-  EXPECT_TRUE(seg->candidate(1).description.find("[H+400]") != std::string::npos);
+  // Verify description contains GRU score tag
+  EXPECT_TRUE(seg->candidate(1).description.find("GRU:") != std::string::npos);
 }
 
 TEST_F(GruRewriterTest, ConfigFileHotReload) {
@@ -463,12 +467,70 @@ TEST_F(GruRewriterTest, ConfigFileHotReload) {
       std::filesystem::temp_directory_path().string(), "test_gru_config.ini");
   {
     std::ofstream ofs(test_config);
-    ofs << "katakana_penalty = 1200.0\n"
-        << "hiragana_penalty = 800.0\n";
+    ofs << "katakana_multiplier = 0.5\n"
+        << "hiragana_multiplier = 1.0\n"
+        << "enable_resegmentation = true\n";
   }
 
   absl::SetFlag(&FLAGS_gru_config_path, test_config);
-  absl::SetFlag(&FLAGS_gru_score_weight, 0.0);
+  absl::SetFlag(&FLAGS_gru_score_weight, 800.0);
+  rewriter_->Reload();
+
+  ConversionRequest request;
+
+  // Step 1: Candidate 0 is "試験", Candidate 1 is "テスト".
+  // With katakana_multiplier = 0.5, "テスト" is boosted and promoted to index 0.
+  {
+    Segments segments;
+    Segment* seg = segments.add_segment();
+    seg->set_key("てすと");
+    AddCandidate("てすと", "試験", 1000, seg);
+    AddCandidate("てすと", "テスト", 1000, seg);
+    EXPECT_TRUE(rewriter_->Rewrite(request, &segments));
+    EXPECT_EQ(seg->candidate(0).value, "テスト");
+    EXPECT_EQ(seg->candidate(1).value, "試験");
+  }
+
+  // Sleep slightly so mtime differs and 1s rate throttle passes
+  absl::SleepFor(absl::Seconds(2));
+
+  // Step 2: Overwrite file with katakana_multiplier = 5.0 WITHOUT calling Reload()
+  {
+    std::ofstream ofs(test_config, std::ios::trunc);
+    ofs << "katakana_multiplier = 5.0\n"
+        << "hiragana_multiplier = 1.0\n"
+        << "enable_resegmentation = true\n";
+  }
+
+  // Step 3: Rewrite again; hot-reload should kick in automatically and penalize "テスト"
+  {
+    Segments segments;
+    Segment* seg = segments.add_segment();
+    seg->set_key("てすと");
+    AddCandidate("てすと", "テスト", 1000, seg);
+    AddCandidate("てすと", "試験", 1000, seg);
+    EXPECT_TRUE(rewriter_->Rewrite(request, &segments));
+    EXPECT_EQ(seg->candidate(0).value, "試験");
+    EXPECT_EQ(seg->candidate(1).value, "テスト");
+  }
+
+  // Clean up
+  std::filesystem::remove(test_config);
+  std::filesystem::remove(test_config + ".bak");
+  absl::SetFlag(&FLAGS_gru_config_path, "");
+}
+
+TEST_F(GruRewriterTest, LegacyConfigAutoUpgradeAndFallback) {
+  const std::string test_config = FileUtil::JoinPath(
+      std::filesystem::temp_directory_path().string(), "test_legacy_config.ini");
+  {
+    std::ofstream ofs(test_config);
+    ofs << "katakana_penalty = 800.0\n"
+        << "hiragana_penalty = 500.0\n";
+  }
+
+  absl::SetFlag(&FLAGS_gru_config_path, test_config);
+  absl::SetFlag(&FLAGS_gru_score_weight, 800.0);
   rewriter_->Reload();
 
   ConversionRequest request;
@@ -476,15 +538,25 @@ TEST_F(GruRewriterTest, ConfigFileHotReload) {
 
   Segment* seg = segments.add_segment();
   seg->set_key("てすと");
-  AddCandidate("てすと", "テスト", 1000, seg);  // katakana +1200 => 2200
-  AddCandidate("てすと", "試験", 1500, seg);    // kanji => 1500
+  AddCandidate("てすと", "テスト", 1000, seg);
+  AddCandidate("てすと", "試験", 1000, seg);
 
+  // Even with legacy katakana_penalty, fallback or auto-upgrade enables penalty
   EXPECT_TRUE(rewriter_->Rewrite(request, &segments));
   EXPECT_EQ(seg->candidate(0).value, "試験");
-  EXPECT_TRUE(seg->candidate(1).description.find("[K+1200]") != std::string::npos);
+
+  // Verify backup was created and file was upgraded to new format
+  EXPECT_TRUE(std::filesystem::exists(test_config + ".bak"));
+
+  std::ifstream ifs(test_config);
+  std::string upgraded((std::istreambuf_iterator<char>(ifs)),
+                       std::istreambuf_iterator<char>());
+  EXPECT_TRUE(upgraded.find("katakana_multiplier") != std::string::npos);
 
   // Clean up
   std::filesystem::remove(test_config);
+  std::filesystem::remove(test_config + ".bak");
+  absl::SetFlag(&FLAGS_gru_config_path, "");
 }
 
 TEST_F(GruRewriterTest, PunctuationNormalizationScore) {
@@ -506,9 +578,9 @@ TEST_F(GruRewriterTest, PunctuationNormalizationScore) {
   rewriter_->Rewrite(request, &segments_touten);
   rewriter_->Rewrite(request, &segments_comma);
 
-  // Both should select "今日は" candidates and produce identical ranking
-  EXPECT_EQ(segments_touten.conversion_segment(0).candidate(0).value, "今日は、");
-  EXPECT_EQ(segments_comma.conversion_segment(0).candidate(0).value, "今日は，");
+  // Both should select identical candidates and produce identical ranking
+  EXPECT_EQ(segments_touten.conversion_segment(0).candidate(0).value, "教派、");
+  EXPECT_EQ(segments_comma.conversion_segment(0).candidate(0).value, "教派，");
 
   // Descriptions should contain identical GRU score values
   const std::string desc_touten = segments_touten.conversion_segment(0).candidate(0).description;

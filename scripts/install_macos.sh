@@ -81,9 +81,14 @@ for dir in \
     cp -f "$REPO_ROOT/models/grumodel.bin" "$dir/"
     cp -f "$REPO_ROOT/models/chardata.bin" "$dir/"
   fi
-  if [ ! -f "$dir/gru_config.ini" ] && [ -f "$REPO_ROOT/models/gru_config.ini" ]; then
-    echo "[+] Initializing $dir/gru_config.ini from default template ..."
-    cp "$REPO_ROOT/models/gru_config.ini" "$dir/gru_config.ini"
+  TARGET_INI="$dir/gru_config.ini"
+  if [ ! -f "$TARGET_INI" ] && [ -f "$REPO_ROOT/models/gru_config.ini" ]; then
+    echo "[+] Initializing $TARGET_INI from default template ..."
+    cp "$REPO_ROOT/models/gru_config.ini" "$TARGET_INI"
+  elif [ -f "$TARGET_INI" ] && grep -q "katakana_penalty" "$TARGET_INI" && ! grep -q "katakana_multiplier" "$TARGET_INI"; then
+    echo "[+] Upgrading legacy $TARGET_INI to new format (backup saved to $TARGET_INI.bak) ..."
+    cp "$TARGET_INI" "$TARGET_INI.bak"
+    cp "$REPO_ROOT/models/gru_config.ini" "$TARGET_INI"
   fi
 done
 echo "[+] GRU model files and configuration installed to Application Support and ~/.config/mozc/"

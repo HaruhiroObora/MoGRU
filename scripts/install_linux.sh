@@ -192,16 +192,24 @@ if [ -f "$REPO_ROOT/models/grumodel.bin" ] && [ -f "$REPO_ROOT/models/chardata.b
   cp -f "$REPO_ROOT/models/chardata.bin" "$HOME/.mozc/"
 fi
 
-# Deploy default gru_config.ini if not already existing (preserve user customization)
+# Deploy default gru_config.ini if not already existing or upgrade legacy format
 for conf_dir in "$HOME/.config/mozc" "$HOME/.mozc"; do
   mkdir -p "$conf_dir"
-  if [ ! -f "$conf_dir/gru_config.ini" ]; then
+  TARGET_INI="$conf_dir/gru_config.ini"
+  if [ ! -f "$TARGET_INI" ]; then
     if [ -f "$REPO_ROOT/models/gru_config.ini" ]; then
-      echo "[+] Initializing $conf_dir/gru_config.ini from default template ..."
-      cp "$REPO_ROOT/models/gru_config.ini" "$conf_dir/gru_config.ini"
+      echo "[+] Initializing $TARGET_INI from default template ..."
+      cp "$REPO_ROOT/models/gru_config.ini" "$TARGET_INI"
     fi
   else
-    echo "[*] Preserving existing configuration: $conf_dir/gru_config.ini"
+    # Check if existing ini is legacy format
+    if grep -q "katakana_penalty" "$TARGET_INI" && ! grep -q "katakana_multiplier" "$TARGET_INI"; then
+      echo "[+] Upgrading legacy $TARGET_INI to new format (backup saved to $TARGET_INI.bak) ..."
+      cp "$TARGET_INI" "$TARGET_INI.bak"
+      cp "$REPO_ROOT/models/gru_config.ini" "$TARGET_INI"
+    else
+      echo "[*] Preserving existing configuration: $TARGET_INI"
+    fi
   fi
 done
 
