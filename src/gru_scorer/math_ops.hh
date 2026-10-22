@@ -6,6 +6,9 @@
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
+#if defined(_WIN32) || defined(_MSC_VER)
+#include <intrin.h>
+#endif
 #endif
 
 namespace gruscorer::math
@@ -16,7 +19,35 @@ namespace gruscorer::math
  */
 inline bool HasAvx2Fma() noexcept
 {
-#if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(_M_X64))
+#if defined(_WIN32) || defined(_MSC_VER)
+#if defined(_M_X64) || defined(__x86_64__)
+    static const bool supported = []() noexcept -> bool {
+        int cpu_info[4] = {0};
+        __cpuid(cpu_info, 0);
+        const int max_ids = cpu_info[0];
+        if (max_ids < 7) return false;
+
+        __cpuid(cpu_info, 1);
+        // ECX: bit 12 = FMA, bit 27 = OSXSAVE, bit 28 = AVX
+        const bool has_osxsave = (cpu_info[2] & (1 << 27)) != 0;
+        const bool has_avx = (cpu_info[2] & (1 << 28)) != 0;
+        const bool has_fma = (cpu_info[2] & (1 << 12)) != 0;
+        if (!has_osxsave || !has_avx || !has_fma) return false;
+
+        // Verify that OS supports AVX registers saving (XCR0 bits 1 and 2)
+        const unsigned __int64 xcr0 = _xgetbv(0);
+        if ((xcr0 & 0x6) != 0x6) return false;
+
+        __cpuidex(cpu_info, 7, 0);
+        // EBX: bit 5 = AVX2
+        const bool has_avx2 = (cpu_info[1] & (1 << 5)) != 0;
+        return has_avx2;
+    }();
+    return supported;
+#else
+    return false;
+#endif
+#elif (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(_M_X64))
     static const bool supported = __builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma");
     return supported;
 #else

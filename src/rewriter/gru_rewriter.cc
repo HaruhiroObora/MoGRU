@@ -218,6 +218,11 @@ std::string ResolveConfigFilePath(const std::string& user_specified) {
 
     return config_path;  // target for creation
   }
+  const std::string user_profile = SystemUtil::GetUserProfileDirectory();
+  if (!user_profile.empty()) {
+    std::string path = FileUtil::JoinPath(user_profile, "gru_config.ini");
+    return path;
+  }
   return "";
 }
 
