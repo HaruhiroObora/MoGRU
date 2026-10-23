@@ -462,6 +462,54 @@ TEST_F(GruRewriterTest, HiraganaMultiplierRerank) {
   EXPECT_TRUE(seg->candidate(1).description.find("GRU:") != std::string::npos);
 }
 
+TEST_F(GruRewriterTest, HiraganaSingleCharExemptFromPenalty) {
+  // Even with high hiragana_multiplier, single-character hiragana (e.g. particles like "は")
+  // must have effective_multiplier = 1.0 (no penalty) because excess length (L - 1) is 0.
+  absl::SetFlag(&FLAGS_gru_hiragana_multiplier, 5.0);
+  absl::SetFlag(&FLAGS_gru_hiragana_length_power, 1.0);
+  absl::SetFlag(&FLAGS_gru_score_weight, 800.0);
+  rewriter_->Reload();
+
+  ConversionRequest request;
+  Segments segments;
+
+  Segment* seg = segments.add_segment();
+  seg->set_key("は");
+  AddCandidate("は", "は", 1000, seg);
+  AddCandidate("は", "歯", 1000, seg);
+
+  rewriter_->Rewrite(request, &segments);
+
+  // Candidate "は" should have GRU score evaluated without 5x penalty
+  for (size_t i = 0; i < seg->candidates_size(); ++i) {
+    if (seg->candidate(i).value == "は") {
+      EXPECT_TRUE(seg->candidate(i).description.find("GRU:") != std::string::npos);
+    }
+  }
+}
+
+TEST_F(GruRewriterTest, HiraganaLengthScaledPenalty) {
+  // Verify that multi-character hiragana has multiplier scaled by (L - 1)^power.
+  absl::SetFlag(&FLAGS_gru_hiragana_multiplier, 1.2);
+  absl::SetFlag(&FLAGS_gru_hiragana_length_power, 1.0);
+  absl::SetFlag(&FLAGS_gru_score_weight, 800.0);
+  rewriter_->Reload();
+
+  ConversionRequest request;
+  Segments segments;
+
+  // For a 4-character hiragana "とうきょう", L=4, excess = 3.
+  // effective_multiplier = 1.0 + (1.2 - 1.0) * 3 = 1.6.
+  Segment* seg = segments.add_segment();
+  seg->set_key("とうきょう");
+  AddCandidate("とうきょう", "とうきょう", 1000, seg);
+  AddCandidate("とうきょう", "東京", 1000, seg);
+
+  EXPECT_TRUE(rewriter_->Rewrite(request, &segments));
+  EXPECT_EQ(seg->candidate(0).value, "東京");
+  EXPECT_EQ(seg->candidate(1).value, "とうきょう");
+}
+
 TEST_F(GruRewriterTest, ConfigFileHotReload) {
   const std::string test_config = FileUtil::JoinPath(
       std::filesystem::temp_directory_path().string(), "test_gru_config.ini");

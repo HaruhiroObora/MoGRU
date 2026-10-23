@@ -85,8 +85,8 @@ for dir in \
   if [ ! -f "$TARGET_INI" ] && [ -f "$REPO_ROOT/models/gru_config.ini" ]; then
     echo "[+] Initializing $TARGET_INI from default template ..."
     cp "$REPO_ROOT/models/gru_config.ini" "$TARGET_INI"
-  elif [ -f "$TARGET_INI" ] && grep -q "katakana_penalty" "$TARGET_INI" && ! grep -q "katakana_multiplier" "$TARGET_INI"; then
-    echo "[+] Upgrading legacy $TARGET_INI to new format (backup saved to $TARGET_INI.bak) ..."
+  elif [ -f "$TARGET_INI" ] && (grep -q "katakana_penalty" "$TARGET_INI" || ! grep -q "hiragana_length_power" "$TARGET_INI"); then
+    echo "[+] Upgrading $TARGET_INI to new format with hiragana length scaling (backup saved to $TARGET_INI.bak) ..."
     cp "$TARGET_INI" "$TARGET_INI.bak"
     cp "$REPO_ROOT/models/gru_config.ini" "$TARGET_INI"
   fi

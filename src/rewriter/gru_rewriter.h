@@ -23,6 +23,7 @@ ABSL_DECLARE_FLAG(int32_t, gru_resegment_cost_threshold);
 ABSL_DECLARE_FLAG(double, gru_score_weight);
 ABSL_DECLARE_FLAG(double, gru_katakana_multiplier);
 ABSL_DECLARE_FLAG(double, gru_hiragana_multiplier);
+ABSL_DECLARE_FLAG(double, gru_hiragana_length_power);
 ABSL_DECLARE_FLAG(std::string, gru_model_path);
 ABSL_DECLARE_FLAG(std::string, gru_chardata_path);
 ABSL_DECLARE_FLAG(std::string, gru_config_path);
@@ -41,6 +42,7 @@ class ImmutableConverterInterface;
 struct GruPenaltyConfig {
   double katakana_multiplier = 1.3;
   double hiragana_multiplier = 1.1;
+  double hiragana_length_power = 1.0;
   double emoji_penalty = 15000.0;
   double alphabet_multiplier = 2.0;
   bool enable_resegmentation = true;

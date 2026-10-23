@@ -45,6 +45,8 @@ ABSL_FLAG(double, gru_katakana_multiplier, 1.3,
           "Score multiplier for all-katakana candidates (>= 1.0 penalizes).");
 ABSL_FLAG(double, gru_hiragana_multiplier, 1.1,
           "Score multiplier for all-hiragana candidates (>= 1.0 penalizes).");
+ABSL_FLAG(double, gru_hiragana_length_power, 1.0,
+          "Exponent for hiragana length penalty scaling.");
 ABSL_FLAG(std::string, gru_model_path, "",
           "Path to GRU model file. If empty, uses default path.");
 ABSL_FLAG(std::string, gru_chardata_path, "",
@@ -123,7 +125,18 @@ float ScoreCandidateWithContext(const gruscorer::GruModel& model,
   } else if (IsKatakanaCandidate(cand)) {
     score *= static_cast<float>(config.katakana_multiplier);
   } else if (IsHiraganaCandidate(cand)) {
-    score *= static_cast<float>(config.hiragana_multiplier);
+    const size_t char_len = Util::CharsLen(cand.value);
+    double mult = 1.0;
+    if (char_len > 1) {
+      const double excess = static_cast<double>(char_len - 1);
+      const double scale = (config.hiragana_length_power == 1.0)
+                               ? excess
+                               : (config.hiragana_length_power == 0.0)
+                                     ? 1.0
+                                     : std::pow(excess, config.hiragana_length_power);
+      mult = 1.0 + (config.hiragana_multiplier - 1.0) * scale;
+    }
+    score *= static_cast<float>(mult);
   }
   return score;
 }
@@ -246,8 +259,17 @@ constexpr absl::string_view kDefaultConfigTemplate =
     "# - 漢字変換できる語で、ひらがなのまま確定するのを防ぎたい場合に有効です。\n"
     "# - 1.0 = 補正なし\n"
     "# - 1.0 より大きい値（例: 1.1, 1.3）: 平仮名候補が抑制されます。\n"
-    "# - 注意: 値を大きくしすぎると、助詞や平仮名表記の語が変換されにくくなるため微調整を推奨します。\n"
+    "# - 1文字の助詞（「は」「が」「を」等）は自動的にペナルティ0倍（補正なし）となります。\n"
+    "# - 2文字以上の語には、文字数に応じたスケーリングが適用されます。\n"
     "hiragana_multiplier = 1.1\n"
+    "\n"
+    "# 【平仮名ペナルティの文字数スケーリング指数】 (初期値: 1.0)\n"
+    "# - 文字数 L に応じて倍率をスケーリングする指数 p です。\n"
+    "# - 式: effective_multiplier = 1.0 + (hiragana_multiplier - 1.0) * (L - 1)^p\n"
+    "# - 1.0: 文字数に比例して線形に増加（2文字: 1.10, 3文字: 1.20, 4文字: 1.30, 6文字: 1.50）\n"
+    "# - 1.5 や 2.0: 長い平仮名ほど加速度的にペナルティを強化（4文字以上をより確実に漢字化）\n"
+    "# - 0.0: 文字数によらず一律 hiragana_multiplier を適用\n"
+    "hiragana_length_power = 1.0\n"
     "\n"
     "# 【絵文字候補に対するペナルティ】 (初期値: 15000.0)\n"
     "# - 文脈予測で絵文字が上位に割り込んでくるのを防ぐための固定加算コストです。\n"
@@ -285,14 +307,11 @@ void EnsureConfigFileExists(const std::string& path) {
                       std::istreambuf_iterator<char>());
   ifs.close();
 
-  const bool has_new_katakana =
-      (content.find("katakana_multiplier") != std::string::npos);
-  const bool has_new_hiragana =
-      (content.find("hiragana_multiplier") != std::string::npos);
-  const bool has_resegment =
-      (content.find("enable_resegmentation") != std::string::npos);
+  const bool has_legacy_keys =
+      (content.find("katakana_penalty") != std::string::npos ||
+       content.find("hiragana_penalty") != std::string::npos);
 
-  if (!has_new_katakana || !has_new_hiragana || !has_resegment) {
+  if (has_legacy_keys) {
     std::error_code ec;
     std::filesystem::copy_file(
         path, path + ".bak",
@@ -301,7 +320,42 @@ void EnsureConfigFileExists(const std::string& path) {
     std::ofstream ofs(path, std::ios::trunc);
     if (ofs.is_open()) {
       ofs << kDefaultConfigTemplate;
-      LOG(INFO) << "GruRewriter: Upgraded config file to new format: " << path;
+      LOG(INFO) << "GruRewriter: Upgraded legacy config file to new format: " << path;
+    }
+    return;
+  }
+
+  // If already in new format, ensure newly introduced options are appended if missing,
+  // without overwriting existing customized values.
+  std::string append_content;
+  if (content.find("hiragana_length_power") == std::string::npos) {
+    append_content +=
+        "\n# 【平仮名ペナルティの文字数スケーリング指数】 (初期値: 1.0)\n"
+        "# - 1文字の平仮名（助詞「は」「が」等）はペナルティ対象外（等倍 1.0）です。\n"
+        "# - 2文字以上の平仮名に対し、超過文字数 (L - 1) のべき乗でペナルティをスケールします。\n"
+        "hiragana_length_power = 1.0\n";
+  }
+  if (content.find("alphabet_multiplier") == std::string::npos) {
+    append_content +=
+        "\n# 【アルファベットのみの候補に対するスコア乗数】 (初期値: 2.0)\n"
+        "alphabet_multiplier = 2.0\n";
+  }
+  if (content.find("enable_resegmentation") == std::string::npos) {
+    append_content +=
+        "\n# 【文節区切り再編成（Resegmentation）の有効化】 (初期値: true)\n"
+        "enable_resegmentation = true\n";
+  }
+  if (content.find("resegment_threshold") == std::string::npos) {
+    append_content +=
+        "\n# 【文節区切りを変更するための最小コスト改善閾値】 (初期値: 600.0)\n"
+        "resegment_threshold = 600.0\n";
+  }
+
+  if (!append_content.empty()) {
+    std::ofstream ofs(path, std::ios::app);
+    if (ofs.is_open()) {
+      ofs << append_content;
+      LOG(INFO) << "GruRewriter: Appended missing config options to: " << path;
     }
   }
 }
@@ -342,6 +396,8 @@ GruPenaltyConfig ParseConfigFile(const std::string& path, const GruPenaltyConfig
       } else if (key == "hiragana_multiplier") {
         config.hiragana_multiplier = d;
         has_hiragana_mult = true;
+      } else if (key == "hiragana_length_power") {
+        config.hiragana_length_power = d;
       } else if (key == "katakana_penalty") {
         legacy_katakana_penalty = d;
         has_legacy_katakana_penalty = true;
@@ -382,6 +438,10 @@ void ApplyEnvOverrides(GruPenaltyConfig* config) {
   if (const char* e = std::getenv("MOZC_GRU_HIRAGANA_MULTIPLIER")) {
     double d = 0.0;
     if (absl::SimpleAtod(e, &d)) config->hiragana_multiplier = d;
+  }
+  if (const char* e = std::getenv("MOZC_GRU_HIRAGANA_LENGTH_POWER")) {
+    double d = 0.0;
+    if (absl::SimpleAtod(e, &d)) config->hiragana_length_power = d;
   }
   if (const char* e = std::getenv("MOZC_GRU_ALPHABET_MULTIPLIER")) {
     double d = 0.0;
@@ -555,6 +615,7 @@ GruPenaltyConfig GruRewriter::GetPenaltyConfig() const {
     GruPenaltyConfig base;
     base.katakana_multiplier = absl::GetFlag(FLAGS_gru_katakana_multiplier);
     base.hiragana_multiplier = absl::GetFlag(FLAGS_gru_hiragana_multiplier);
+    base.hiragana_length_power = absl::GetFlag(FLAGS_gru_hiragana_length_power);
     base.enable_resegmentation = absl::GetFlag(FLAGS_enable_gru_resegmentation);
     base.resegment_threshold =
         static_cast<double>(absl::GetFlag(FLAGS_gru_resegment_cost_threshold));
@@ -566,6 +627,8 @@ GruPenaltyConfig GruRewriter::GetPenaltyConfig() const {
                 << penalty_config_.katakana_multiplier
                 << ", hiragana_multiplier="
                 << penalty_config_.hiragana_multiplier
+                << ", hiragana_length_power="
+                << penalty_config_.hiragana_length_power
                 << ", alphabet_multiplier="
                 << penalty_config_.alphabet_multiplier
                 << ", emoji_penalty=" << penalty_config_.emoji_penalty
