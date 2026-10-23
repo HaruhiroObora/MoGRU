@@ -117,8 +117,18 @@ information and useful links about recent changes.
 License
 -------
 
-All Mozc code written by Google is released under
-[The BSD 3-Clause License](http://opensource.org/licenses/BSD-3-Clause).
+本ソフトウェアは以下のライセンスのもとで公開されています。
+
+- **MoGRU 拡張・追加コード（GRU Scorer、ライブ変換、各種インストーラスクリプト等）**:
+  Copyright (c) 2026 Haruhiro Obora.  
+  [The BSD 3-Clause License](http://opensource.org/licenses/BSD-3-Clause) のもとで配布されます。
+- **Mozc オリジナルコード**:
+  All Mozc code written by Google is released under
+  [The BSD 3-Clause License](http://opensource.org/licenses/BSD-3-Clause).
+- **Fcitx5 モジュール (`src/unix/fcitx5`)**:
+  Copyright (C) CSSlayer and The Fcitx Team.  
+  [LGPL-2.1+ / GPL-2.0+](src/unix/fcitx5/org.fcitx.Fcitx5.Addon.Mozc.metainfo.xml.in) のもとで配布されます。
+
 For third party code under [src/third_party](src/third_party) directory,
 see each sub directory to find the copyright notice.  Note also that
 outside [src/third_party](src/third_party) following directories contain
