@@ -515,8 +515,9 @@ TEST_F(GruRewriterTest, ConfigFileHotReload) {
   }
 
   // Clean up
-  std::filesystem::remove(test_config);
-  std::filesystem::remove(test_config + ".bak");
+  std::error_code ec;
+  std::filesystem::remove(test_config, ec);
+  std::filesystem::remove(test_config + ".bak", ec);
   absl::SetFlag(&FLAGS_gru_config_path, "");
 }
 
@@ -548,14 +549,17 @@ TEST_F(GruRewriterTest, LegacyConfigAutoUpgradeAndFallback) {
   // Verify backup was created and file was upgraded to new format
   EXPECT_TRUE(std::filesystem::exists(test_config + ".bak"));
 
-  std::ifstream ifs(test_config);
-  std::string upgraded((std::istreambuf_iterator<char>(ifs)),
-                       std::istreambuf_iterator<char>());
-  EXPECT_TRUE(upgraded.find("katakana_multiplier") != std::string::npos);
+  {
+    std::ifstream ifs(test_config);
+    std::string upgraded((std::istreambuf_iterator<char>(ifs)),
+                         std::istreambuf_iterator<char>());
+    EXPECT_TRUE(upgraded.find("katakana_multiplier") != std::string::npos);
+  }
 
-  // Clean up
-  std::filesystem::remove(test_config);
-  std::filesystem::remove(test_config + ".bak");
+  // Clean up: ensure file stream is closed before remove (required on Windows)
+  std::error_code ec;
+  std::filesystem::remove(test_config, ec);
+  std::filesystem::remove(test_config + ".bak", ec);
   absl::SetFlag(&FLAGS_gru_config_path, "");
 }
 
