@@ -74,6 +74,26 @@ struct GruContext
     bool is_empty = true;
 };
 
+/**
+ * @brief Parameter scope for in-process online learning.
+ */
+enum class TrainMode
+{
+    kOutputOnly = 0, // Update only output projection (w_out_ and b_out_)
+    kFullBptt = 1    // Update all parameters (Embedding + GRU + Output) via BPTT
+};
+
+/**
+ * @brief Hyperparameters for online learning step.
+ */
+struct TrainConfig
+{
+    TrainMode mode = TrainMode::kOutputOnly;
+    float learning_rate = 0.005f;
+    float weight_decay = 0.001f; // L2 anchor regularization toward base model weights
+    float max_grad_norm = 1.0f;  // Global gradient norm clipping threshold
+};
+
 class GruModel
 {
 public:
@@ -87,10 +107,57 @@ public:
     GruModel &operator=(GruModel &&) noexcept;
 
     /**
-     * @brief Load weights binary from file.
+     * @brief Load base weights binary from file and initialize base weight anchor.
      * @return true on success, false otherwise.
      */
     bool LoadModel(const std::string &path);
+
+    /**
+     * @brief Load user-adapted weights binary into active weights (keeping base anchor intact).
+     * Requires base model to be loaded first and header dimensions to match.
+     * @return true on success, false otherwise.
+     */
+    bool LoadUserWeights(const std::string &path);
+
+    /**
+     * @brief Save current active weights binary to file atomically (via temporary file).
+     * @return true on success, false otherwise.
+     */
+    bool SaveModel(const std::string &path) const;
+
+    /**
+     * @brief Perform one online learning step on a committed UTF-8 string given a preceding context.
+     *
+     * @param indexer CharIndex instance to map characters to IDs
+     * @param utf8_str Committed UTF-8 target string
+     * @param context Preceding GRU context (hidden state and last token)
+     * @param config Online learning hyperparameters
+     * @return Pre-update average log-probability per character of utf8_str.
+     */
+    float TrainOnStringWithContext(const charindex::CharIndex &indexer,
+                                   std::string_view utf8_str,
+                                   const GruContext &context,
+                                   const TrainConfig &config);
+
+    /**
+     * @brief Perform one online learning step starting from empty (<bos>) context.
+     */
+    float TrainOnString(const charindex::CharIndex &indexer,
+                        std::string_view utf8_str,
+                        const TrainConfig &config);
+
+    /**
+     * @brief Revert weights to the state immediately prior to the last TrainOnString* call.
+     * @return true if a revert snapshot was available and restored, false otherwise.
+     */
+    bool RevertLastTrainStep();
+
+    /**
+     * @brief Reset active weights back to the initial base model weights loaded by LoadModel().
+     */
+    void ResetToBaseWeights();
+
+    bool has_revert_snapshot() const noexcept { return has_revert_snapshot_; }
 
     /**
      * @brief Execute single step of GRU inference.
@@ -185,19 +252,24 @@ private:
                         float *h_next) const;
 
     bool is_loaded_ = false;
+    bool has_revert_snapshot_ = false;
     uint32_t vocab_size_ = 0;
     uint32_t hidden_size_ = 0;
+    size_t total_elements_ = 0;
+    uint64_t base_model_hash_ = 0;
 
     std::unique_ptr<float[], AlignedDeleter> weights_buffer_;
+    std::unique_ptr<float[], AlignedDeleter> base_weights_buffer_;
+    std::unique_ptr<float[], AlignedDeleter> revert_weights_buffer_;
 
     // Pointers into weights_buffer_
-    const float *w_emb_ = nullptr; // [vocab_size, hidden_size]
-    const float *w_ih_ = nullptr;  // [3 * hidden_size, hidden_size]
-    const float *w_hh_ = nullptr;  // [3 * hidden_size, hidden_size]
-    const float *b_ih_ = nullptr;  // [3 * hidden_size]
-    const float *b_hh_ = nullptr;  // [3 * hidden_size]
-    const float *w_out_ = nullptr; // [vocab_size, hidden_size]
-    const float *b_out_ = nullptr; // [vocab_size]
+    float *w_emb_ = nullptr; // [vocab_size, hidden_size]
+    float *w_ih_ = nullptr;  // [3 * hidden_size, hidden_size]
+    float *w_hh_ = nullptr;  // [3 * hidden_size, hidden_size]
+    float *b_ih_ = nullptr;  // [3 * hidden_size]
+    float *b_hh_ = nullptr;  // [3 * hidden_size]
+    float *w_out_ = nullptr; // [vocab_size, hidden_size]
+    float *b_out_ = nullptr; // [vocab_size]
 };
 
 } // namespace gruscorer

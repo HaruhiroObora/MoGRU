@@ -34,6 +34,7 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <vector>
 
@@ -308,6 +309,121 @@ void TestGruContextCaching()
     std::cout << "[Test] TestGruContextCaching passed! Chain rule strictly holds." << std::endl;
 }
 
+void TestOnlineTrainingAndPersistence()
+{
+    std::cout << "[Test] Running TestOnlineTrainingAndPersistence..." << std::endl;
+
+    charindex::CharIndex indexer;
+    std::string chardata_path = FindDataFile("chardata.bin");
+    assert(indexer.LoadFile(chardata_path));
+
+    gruscorer::GruModel model;
+    std::string model_path = FindDataFile("dummy_model.bin");
+    assert(model.LoadModel(model_path));
+
+    const std::string prefix = "今日は";
+    const std::string target = "良い天気ですね";
+
+    // 1. Test Output-Only Online Learning
+    auto ctx0 = model.ComputeContext(indexer, prefix);
+    const float base_score = model.ScoreStringWithContext(indexer, target, ctx0, true);
+
+    gruscorer::TrainConfig out_cfg;
+    out_cfg.mode = gruscorer::TrainMode::kOutputOnly;
+    out_cfg.learning_rate = 0.05f;
+    out_cfg.weight_decay = 0.001f;
+    out_cfg.max_grad_norm = 5.0f;
+
+    float pre_step1 = model.TrainOnStringWithContext(indexer, target, ctx0, out_cfg);
+    AssertNear(pre_step1, base_score, 1e-4f, "Pre-update score returned by TrainOnStringWithContext");
+
+    const float after_step1 = model.ScoreStringWithContext(indexer, target, ctx0, true);
+    assert(after_step1 > base_score && "Output-only training must improve target log-probability");
+
+    // Verify that prefix hidden context is unchanged in OutputOnly mode
+    auto ctx_after_out = model.ComputeContext(indexer, prefix);
+    for (size_t i = 0; i < model.hidden_size(); ++i)
+    {
+        AssertNear(ctx_after_out.h[i], ctx0.h[i], 1e-6f, "OutputOnly must not alter hidden state weights");
+    }
+
+    // 2. Test RevertLastTrainStep
+    assert(model.has_revert_snapshot());
+    assert(model.RevertLastTrainStep());
+    assert(!model.has_revert_snapshot());
+    const float reverted_score = model.ScoreStringWithContext(indexer, target, ctx0, true);
+    AssertNear(reverted_score, base_score, 1e-5f, "RevertLastTrainStep must restore exact pre-step score");
+
+    // 3. Test Full BPTT Online Learning
+    gruscorer::TrainConfig full_cfg;
+    full_cfg.mode = gruscorer::TrainMode::kFullBptt;
+    full_cfg.learning_rate = 0.05f;
+    full_cfg.weight_decay = 0.001f;
+    full_cfg.max_grad_norm = 5.0f;
+
+    float prev_score = base_score;
+    for (int step = 0; step < 3; ++step)
+    {
+        auto step_ctx = model.ComputeContext(indexer, prefix);
+        model.TrainOnStringWithContext(indexer, target, step_ctx, full_cfg);
+        auto new_ctx = model.ComputeContext(indexer, prefix);
+        float new_score = model.ScoreStringWithContext(indexer, target, new_ctx, true);
+        assert(new_score > prev_score && "Full BPTT training must monotonically improve score");
+        prev_score = new_score;
+    }
+
+    // Verify that Full BPTT also updates hidden state representations
+    auto ctx_after_full = model.ComputeContext(indexer, prefix);
+    float h_diff = 0.0f;
+    for (size_t i = 0; i < model.hidden_size(); ++i)
+    {
+        h_diff += std::fabs(ctx_after_full.h[i] - ctx0.h[i]);
+    }
+    assert(h_diff > 1e-6f && "Full BPTT must update GRU / embedding weights");
+
+    // 4. Test SaveModel & LoadUserWeights
+    const char *tmpdir = std::getenv("TEST_TMPDIR");
+    std::string user_model_path = (tmpdir ? std::string(tmpdir) : "/tmp") + "/test_grumodel_user.bin";
+    assert(model.SaveModel(user_model_path));
+
+    gruscorer::GruModel reloaded_model;
+    assert(reloaded_model.LoadModel(model_path));
+    assert(reloaded_model.LoadUserWeights(user_model_path));
+
+    auto reloaded_ctx = reloaded_model.ComputeContext(indexer, prefix);
+    const float reloaded_score = reloaded_model.ScoreStringWithContext(indexer, target, reloaded_ctx, true);
+    AssertNear(reloaded_score, prev_score, 1e-5f, "Reloaded user weights must match trained model score");
+
+    // 5. Test ResetToBaseWeights (preserves base anchor even after LoadUserWeights)
+    reloaded_model.ResetToBaseWeights();
+    auto reset_ctx = reloaded_model.ComputeContext(indexer, prefix);
+    const float reset_score = reloaded_model.ScoreStringWithContext(indexer, target, reset_ctx, true);
+    AssertNear(reset_score, base_score, 1e-5f, "ResetToBaseWeights must restore original base model score");
+
+    // 6. Test Base Model Fingerprint Mismatch Protection:
+    // If the user switches to a different base model (even with the same vocab_size & hidden_size),
+    // LoadUserWeights must reject the old user_model_path so the new base model is not overwritten.
+    std::string different_base_path = (tmpdir ? std::string(tmpdir) : "/tmp") + "/test_different_base.bin";
+    {
+        std::filesystem::copy_file(model_path, different_base_path,
+                                   std::filesystem::copy_options::overwrite_existing);
+        std::fstream fs(different_base_path, std::ios::in | std::ios::out | std::ios::binary);
+        fs.seekp(sizeof(gruscorer::ModelHeader));
+        float tweaked_val = 0.12345f;
+        fs.write(reinterpret_cast<const char *>(&tweaked_val), sizeof(float));
+    }
+    gruscorer::GruModel new_base_model;
+    assert(new_base_model.LoadModel(different_base_path));
+    assert(!new_base_model.LoadUserWeights(user_model_path) &&
+           "LoadUserWeights must reject user weights derived from a different base model");
+
+    std::error_code ec;
+    std::filesystem::remove(user_model_path, ec);
+    std::filesystem::remove(different_base_path, ec);
+
+    std::cout << "[Test] TestOnlineTrainingAndPersistence passed!" << std::endl;
+}
+
 void BenchmarkInference()
 {
     std::cout << "[Bench] Running BenchmarkInference..." << std::endl;
@@ -357,6 +473,7 @@ int main()
     TestGruModelInference();
     TestCharIndexIntegration();
     TestGruContextCaching();
+    TestOnlineTrainingAndPersistence();
     BenchmarkInference();
 
     std::cout << "========================================" << std::endl;

@@ -283,6 +283,71 @@ inline void Gemv(const float *W, const float *x, const float *b, float *y, size_
 }
 
 /**
+ * @brief Scalar fallback for y += alpha * x
+ */
+inline void AxpyScalar(float alpha, const float *x, float *y, size_t n) noexcept
+{
+    for (size_t i = 0; i < n; ++i)
+    {
+        y[i] += alpha * x[i];
+    }
+}
+
+#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((target("avx2,fma")))
+#endif
+inline void AxpyAvx2Fma(float alpha, const float *x, float *y, size_t n) noexcept
+{
+    size_t i = 0;
+    __m256 valpha = _mm256_set1_ps(alpha);
+    for (; i + 8 <= n; i += 8)
+    {
+        __m256 vy = _mm256_loadu_ps(&y[i]);
+        __m256 vx = _mm256_loadu_ps(&x[i]);
+        vy = _mm256_fmadd_ps(valpha, vx, vy);
+        _mm256_storeu_ps(&y[i], vy);
+    }
+    for (; i < n; ++i)
+    {
+        y[i] += alpha * x[i];
+    }
+}
+#endif
+
+/**
+ * @brief Dynamic CPU-dispatched vector accumulate: y += alpha * x
+ */
+inline void Axpy(float alpha, const float *x, float *y, size_t n) noexcept
+{
+    if (alpha == 0.0f) return;
+#if defined(__x86_64__) || defined(_M_X64)
+    if (HasAvx2Fma() && n >= 8)
+    {
+        AxpyAvx2Fma(alpha, x, y, n);
+        return;
+    }
+#endif
+    AxpyScalar(alpha, x, y, n);
+}
+
+/**
+ * @brief Transposed matrix-vector accumulate: y += W^T * x
+ * where W is [rows, cols], x is [rows], and y is [cols].
+ */
+inline void GemvTransposedAdd(const float *W, const float *x, float *y, size_t rows, size_t cols) noexcept
+{
+    for (size_t r = 0; r < rows; ++r)
+    {
+        const float xr = x[r];
+        if (xr != 0.0f)
+        {
+            Axpy(xr, &W[r * cols], y, cols);
+        }
+    }
+}
+
+/**
  * @brief Standard sigmoid activation function: 1 / (1 + exp(-x))
  */
 inline float Sigmoid(float x) noexcept

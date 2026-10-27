@@ -45,12 +45,14 @@
 
 ABSL_DECLARE_FLAG(bool, enable_gru_rewriter);
 ABSL_DECLARE_FLAG(bool, enable_gru_resegmentation);
+ABSL_DECLARE_FLAG(bool, enable_gru_online_learning);
 ABSL_DECLARE_FLAG(int32_t, gru_resegment_cost_threshold);
 ABSL_DECLARE_FLAG(double, gru_score_weight);
 ABSL_DECLARE_FLAG(double, gru_katakana_multiplier);
 ABSL_DECLARE_FLAG(double, gru_hiragana_multiplier);
 ABSL_DECLARE_FLAG(double, gru_hiragana_length_power);
 ABSL_DECLARE_FLAG(std::string, gru_model_path);
+ABSL_DECLARE_FLAG(std::string, gru_user_model_path);
 ABSL_DECLARE_FLAG(std::string, gru_chardata_path);
 ABSL_DECLARE_FLAG(std::string, gru_config_path);
 
@@ -73,6 +75,11 @@ struct GruPenaltyConfig {
   double alphabet_multiplier = 2.0;
   bool enable_resegmentation = true;
   double resegment_threshold = 600.0;
+  bool enable_online_learning = true;
+  std::string online_learning_mode = "output_only";
+  double online_learning_rate = 0.005;
+  double online_learning_weight_decay = 0.001;
+  int32_t online_learning_save_interval = 5;
 };
 
 class GruRewriter : public RewriterInterface {
@@ -94,8 +101,17 @@ class GruRewriter : public RewriterInterface {
       const ConversionRequest& request,
       const Segments& segments) const override;
 
+  void Finish(const ConversionRequest& request,
+              const Segments& segments) override;
+
+  void Revert(const Segments& segments) override;
+
+  bool Sync() override;
+
   // Explicitly initialize or reload models and configurations.
   bool Reload() override;
+
+  void Clear() override;
 
  private:
   struct ResegmentResult {
@@ -128,10 +144,13 @@ class GruRewriter : public RewriterInterface {
   mutable std::unique_ptr<charindex::CharIndex> indexer_ ABSL_GUARDED_BY(mutex_);
   mutable std::string loaded_model_path_ ABSL_GUARDED_BY(mutex_);
   mutable std::string loaded_chardata_path_ ABSL_GUARDED_BY(mutex_);
+  mutable std::string user_model_path_ ABSL_GUARDED_BY(mutex_);
   mutable std::string config_file_path_ ABSL_GUARDED_BY(mutex_);
   mutable GruPenaltyConfig penalty_config_ ABSL_GUARDED_BY(mutex_);
   mutable int64_t last_config_mtime_ ABSL_GUARDED_BY(mutex_) = 0;
   mutable absl::Time last_config_check_time_ ABSL_GUARDED_BY(mutex_) = absl::InfinitePast();
+  mutable uint64_t last_revert_id_ ABSL_GUARDED_BY(mutex_) = 0;
+  mutable int32_t unsaved_updates_count_ ABSL_GUARDED_BY(mutex_) = 0;
   mutable bool is_initialized_ ABSL_GUARDED_BY(mutex_) = false;
 
   const ImmutableConverterInterface* immutable_converter_ = nullptr;

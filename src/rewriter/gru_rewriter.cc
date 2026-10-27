@@ -57,10 +57,13 @@
 #include "converter/immutable_converter_interface.h"
 #include "gru_scorer/charindex.hh"
 #include "gru_scorer/gru_model.hh"
+#include "protocol/config.pb.h"
 
 ABSL_FLAG(bool, enable_gru_rewriter, false, "Enable GRU neural LM rewriter.");
 ABSL_FLAG(bool, enable_gru_resegmentation, true,
           "Enable GRU-based segment boundary resegmentation.");
+ABSL_FLAG(bool, enable_gru_online_learning, true,
+          "Enable in-process online learning from committed user history.");
 ABSL_FLAG(int32_t, gru_resegment_cost_threshold, 600,
           "Minimum cost improvement required to trigger resegmentation.");
 ABSL_FLAG(bool, show_gru_score, true,
@@ -75,6 +78,8 @@ ABSL_FLAG(double, gru_hiragana_length_power, 1.0,
           "Exponent for hiragana length penalty scaling.");
 ABSL_FLAG(std::string, gru_model_path, "",
           "Path to GRU model file. If empty, uses default path.");
+ABSL_FLAG(std::string, gru_user_model_path, "",
+          "Path to user-adapted GRU model file. If empty, uses ~/.config/mozc/grumodel_user.bin");
 ABSL_FLAG(std::string, gru_chardata_path, "",
           "Path to CharIndex data file. If empty, uses default path.");
 ABSL_FLAG(std::string, gru_config_path, "",
@@ -265,6 +270,40 @@ std::string ResolveConfigFilePath(const std::string& user_specified) {
   return "";
 }
 
+std::string ResolveUserModelFilePath(const std::string& user_specified) {
+  if (!user_specified.empty()) {
+    if (user_specified[0] == '~') {
+      const char* home = std::getenv("HOME");
+      if (home != nullptr) {
+        return std::string(home) + user_specified.substr(1);
+      }
+    }
+    return user_specified;
+  }
+  if (const char* test_tmpdir = std::getenv("TEST_TMPDIR")) {
+    if (test_tmpdir[0] != '\0') {
+      return FileUtil::JoinPath(test_tmpdir, "grumodel_user.bin");
+    }
+  }
+  const char* home = std::getenv("HOME");
+  if (home != nullptr) {
+    std::string config_path = FileUtil::JoinPath(
+        home, FileUtil::JoinPath(".config/mozc", "grumodel_user.bin"));
+    if (std::filesystem::exists(config_path)) return config_path;
+
+    std::string dot_mozc = FileUtil::JoinPath(
+        home, FileUtil::JoinPath(".mozc", "grumodel_user.bin"));
+    if (std::filesystem::exists(dot_mozc)) return dot_mozc;
+
+    return config_path;  // target for creation
+  }
+  const std::string user_profile = SystemUtil::GetUserProfileDirectory();
+  if (!user_profile.empty()) {
+    return FileUtil::JoinPath(user_profile, "grumodel_user.bin");
+  }
+  return "";
+}
+
 constexpr absl::string_view kDefaultConfigTemplate =
     "# ==============================================================================\n"
     "# Mozc GRU 言語モデル リライター 設定ファイル\n"
@@ -314,7 +353,28 @@ constexpr absl::string_view kDefaultConfigTemplate =
     "# 【文節区切りを変更するための最小コスト改善閾値】 (初期値: 600.0)\n"
     "# - 別の文節区切りパターンのスコアが、デフォルトの区切りよりこの値以上改善した場合のみ区切りを変更します。\n"
     "# - 値を小さくする（例: 300）と積極的に区切りを変更し、大きくする（例: 1000）と慎重になります。\n"
-    "resegment_threshold = 600.0\n";
+    "resegment_threshold = 600.0\n"
+    "\n"
+    "# 【入力履歴を用いたオンライン継続学習の有効化】 (初期値: true)\n"
+    "# - 変換確定時の文字列・文脈を用いて、GRU 言語モデルをリアルタイムに微調整します。\n"
+    "enable_online_learning = true\n"
+    "\n"
+    "# 【オンライン学習の更新対象モード】 (初期値: output_only)\n"
+    "# - output_only: 出力層（w_out / b_out）のみを更新（高速・忘却が起きにくく安定）\n"
+    "# - full: Embedding・GRUセル・出力層の全パラメータをBPTTで更新（高い文脈適応力）\n"
+    "online_learning_mode = output_only\n"
+    "\n"
+    "# 【オンライン学習の学習率】 (初期値: 0.005)\n"
+    "# - output_only モードでは 0.002〜0.01、full モードでは 0.0005〜0.002 程度を推奨します。\n"
+    "online_learning_rate = 0.005\n"
+    "\n"
+    "# 【ベースモデルへのL2アンカー正則化係数】 (初期値: 0.001)\n"
+    "# - 元の言語モデル（grumodel.bin）から重みが過度に乖離して一般的な日本語を忘却するのを防ぎます。\n"
+    "online_learning_weight_decay = 0.001\n"
+    "\n"
+    "# 【学習済みユーザーモデルの自動保存間隔（確定回数）】 (初期値: 5)\n"
+    "# - 指定した確定回数ごと、およびフォーカス移動時（Sync）に ~/.config/mozc/grumodel_user.bin へ保存します。\n"
+    "online_learning_save_interval = 5\n";
 
 void EnsureConfigFileExists(const std::string& path) {
   if (path.empty()) return;
@@ -376,6 +436,32 @@ void EnsureConfigFileExists(const std::string& path) {
         "\n# 【文節区切りを変更するための最小コスト改善閾値】 (初期値: 600.0)\n"
         "resegment_threshold = 600.0\n";
   }
+  if (content.find("enable_online_learning") == std::string::npos) {
+    append_content +=
+        "\n# 【入力履歴を用いたオンライン継続学習の有効化】 (初期値: true)\n"
+        "enable_online_learning = true\n";
+  }
+  if (content.find("online_learning_mode") == std::string::npos) {
+    append_content +=
+        "\n# 【オンライン学習の更新対象モード】 (初期値: output_only)\n"
+        "# - output_only: 出力層のみ更新 / full: 全パラメータをBPTTで更新\n"
+        "online_learning_mode = output_only\n";
+  }
+  if (content.find("online_learning_rate") == std::string::npos) {
+    append_content +=
+        "\n# 【オンライン学習の学習率】 (初期値: 0.005)\n"
+        "online_learning_rate = 0.005\n";
+  }
+  if (content.find("online_learning_weight_decay") == std::string::npos) {
+    append_content +=
+        "\n# 【ベースモデルへのL2アンカー正則化係数】 (初期値: 0.001)\n"
+        "online_learning_weight_decay = 0.001\n";
+  }
+  if (content.find("online_learning_save_interval") == std::string::npos) {
+    append_content +=
+        "\n# 【学習済みユーザーモデルの自動保存間隔（確定回数）】 (初期値: 5)\n"
+        "online_learning_save_interval = 5\n";
+  }
 
   if (!append_content.empty()) {
     std::ofstream ofs(path, std::ios::app);
@@ -414,6 +500,34 @@ GruPenaltyConfig ParseConfigFile(const std::string& path, const GruPenaltyConfig
     absl::string_view key = absl::StripAsciiWhitespace(sv.substr(0, eq_pos));
     absl::string_view val = absl::StripAsciiWhitespace(sv.substr(eq_pos + 1));
 
+    if (key == "online_learning_mode") {
+      if (val == "full" || val == "full_bptt" || val == "output_only") {
+        config.online_learning_mode = std::string(val);
+      }
+      continue;
+    }
+    if (key == "enable_resegmentation") {
+      bool b = true;
+      if (absl::SimpleAtob(val, &b)) {
+        config.enable_resegmentation = b;
+      }
+      continue;
+    }
+    if (key == "enable_online_learning") {
+      bool b = true;
+      if (absl::SimpleAtob(val, &b)) {
+        config.enable_online_learning = b;
+      }
+      continue;
+    }
+    if (key == "online_learning_save_interval") {
+      int32_t interval = 5;
+      if (absl::SimpleAtoi(val, &interval) && interval >= 1) {
+        config.online_learning_save_interval = interval;
+      }
+      continue;
+    }
+
     double d = 0.0;
     if (absl::SimpleAtod(val, &d)) {
       if (key == "katakana_multiplier") {
@@ -436,11 +550,10 @@ GruPenaltyConfig ParseConfigFile(const std::string& path, const GruPenaltyConfig
         config.alphabet_multiplier = d;
       } else if (key == "resegment_threshold") {
         config.resegment_threshold = d;
-      }
-    } else if (key == "enable_resegmentation") {
-      bool b = true;
-      if (absl::SimpleAtob(val, &b)) {
-        config.enable_resegmentation = b;
+      } else if (key == "online_learning_rate") {
+        config.online_learning_rate = d;
+      } else if (key == "online_learning_weight_decay") {
+        config.online_learning_weight_decay = d;
       }
     }
   }
@@ -480,6 +593,20 @@ void ApplyEnvOverrides(GruPenaltyConfig* config) {
   if (const char* e = std::getenv("MOZC_GRU_RESEGMENT_THRESHOLD")) {
     double d = 0.0;
     if (absl::SimpleAtod(e, &d)) config->resegment_threshold = d;
+  }
+  if (const char* e = std::getenv("MOZC_GRU_ENABLE_ONLINE_LEARNING")) {
+    bool b = true;
+    if (absl::SimpleAtob(e, &b)) config->enable_online_learning = b;
+  }
+  if (const char* e = std::getenv("MOZC_GRU_ONLINE_LEARNING_MODE")) {
+    absl::string_view sv = absl::StripAsciiWhitespace(e);
+    if (sv == "full" || sv == "full_bptt" || sv == "output_only") {
+      config->online_learning_mode = std::string(sv);
+    }
+  }
+  if (const char* e = std::getenv("MOZC_GRU_ONLINE_LEARNING_RATE")) {
+    double d = 0.0;
+    if (absl::SimpleAtod(e, &d)) config->online_learning_rate = d;
   }
 }
 
@@ -612,7 +739,9 @@ bool SortSegmentCandidates(Segment* seg,
 
 GruRewriter::GruRewriter(const ImmutableConverterInterface* immutable_converter)
     : immutable_converter_(immutable_converter) {}
-GruRewriter::~GruRewriter() = default;
+GruRewriter::~GruRewriter() {
+  Sync();
+}
 
 GruPenaltyConfig GruRewriter::GetPenaltyConfig() const {
   absl::MutexLock l(mutex_);
@@ -645,6 +774,7 @@ GruPenaltyConfig GruRewriter::GetPenaltyConfig() const {
     base.enable_resegmentation = absl::GetFlag(FLAGS_enable_gru_resegmentation);
     base.resegment_threshold =
         static_cast<double>(absl::GetFlag(FLAGS_gru_resegment_cost_threshold));
+    base.enable_online_learning = absl::GetFlag(FLAGS_enable_gru_online_learning);
 
     if (!config_file_path_.empty() && std::filesystem::exists(config_file_path_)) {
       penalty_config_ = ParseConfigFile(config_file_path_, base);
@@ -661,7 +791,13 @@ GruPenaltyConfig GruRewriter::GetPenaltyConfig() const {
                 << ", enable_resegmentation="
                 << penalty_config_.enable_resegmentation
                 << ", resegment_threshold="
-                << penalty_config_.resegment_threshold;
+                << penalty_config_.resegment_threshold
+                << ", enable_online_learning="
+                << penalty_config_.enable_online_learning
+                << ", online_learning_mode="
+                << penalty_config_.online_learning_mode
+                << ", online_learning_rate="
+                << penalty_config_.online_learning_rate;
     } else {
       penalty_config_ = base;
     }
@@ -678,16 +814,22 @@ bool GruRewriter::EnsureInitialized() const {
       ResolveFilePath(absl::GetFlag(FLAGS_gru_chardata_path), "chardata.bin");
   const std::string model_path =
       ResolveFilePath(absl::GetFlag(FLAGS_gru_model_path), "grumodel.bin");
+  const std::string user_model_path =
+      ResolveUserModelFilePath(absl::GetFlag(FLAGS_gru_user_model_path));
 
   if (is_initialized_ && model_ && model_->is_loaded() && indexer_ &&
       loaded_chardata_path_ == chardata_path &&
-      loaded_model_path_ == model_path) {
+      loaded_model_path_ == model_path &&
+      user_model_path_ == user_model_path) {
     return true;
   }
 
   is_initialized_ = true;
   loaded_chardata_path_ = chardata_path;
   loaded_model_path_ = model_path;
+  user_model_path_ = user_model_path;
+  unsaved_updates_count_ = 0;
+  last_revert_id_ = 0;
   model_.reset();
   indexer_.reset();
 
@@ -713,6 +855,15 @@ bool GruRewriter::EnsureInitialized() const {
     return false;
   }
 
+  if (!user_model_path_.empty() && std::filesystem::exists(user_model_path_)) {
+    if (model->LoadUserWeights(user_model_path_)) {
+      LOG(INFO) << "GruRewriter: Loaded user-adapted GRU weights from " << user_model_path_;
+    } else {
+      LOG(WARNING) << "GruRewriter: Ignored incompatible or corrupted user model at "
+                   << user_model_path_;
+    }
+  }
+
   model_ = std::move(model);
   indexer_ = std::move(indexer);
   LOG(INFO) << "GruRewriter: Successfully loaded GRU model from " << model_path;
@@ -720,18 +871,157 @@ bool GruRewriter::EnsureInitialized() const {
 }
 
 bool GruRewriter::Reload() {
+  Sync();
   {
     absl::MutexLock l(mutex_);
     is_initialized_ = false;
     loaded_chardata_path_.clear();
     loaded_model_path_.clear();
+    user_model_path_.clear();
     config_file_path_.clear();
     last_config_mtime_ = 0;
     last_config_check_time_ = absl::InfinitePast();
+    last_revert_id_ = 0;
+    unsaved_updates_count_ = 0;
     model_.reset();
     indexer_.reset();
   }
   return EnsureInitialized();
+}
+
+void GruRewriter::Finish(const ConversionRequest& request,
+                         const Segments& segments) {
+  if (!absl::GetFlag(FLAGS_enable_gru_rewriter)) {
+    return;
+  }
+  if (!absl::GetFlag(FLAGS_enable_gru_online_learning)) {
+    return;
+  }
+  if (request.incognito_mode()) {
+    return;
+  }
+  if (request.config().history_learning_level() != config::Config::DEFAULT_HISTORY) {
+    return;
+  }
+  if (!EnsureInitialized()) {
+    return;
+  }
+
+  const GruPenaltyConfig penalty_config = GetPenaltyConfig();
+  if (!penalty_config.enable_online_learning ||
+      penalty_config.online_learning_rate <= 0.0) {
+    return;
+  }
+
+  std::string committed_text;
+  const size_t start_seg_idx = segments.history_segments_size();
+  for (size_t i = start_seg_idx; i < segments.segments_size(); ++i) {
+    const Segment& seg = segments.segment(i);
+    if (seg.candidates_size() <= 0 ||
+        seg.segment_type() != Segment::FIXED_VALUE) {
+      continue;
+    }
+    const Segment::Candidate& cand = seg.candidate(0);
+    if (cand.attributes & converter::Attribute::NO_HISTORY_LEARNING) {
+      return;
+    }
+    committed_text.append(cand.value);
+  }
+
+  if (committed_text.empty()) {
+    return;
+  }
+
+  if (!Util::ContainsScriptType(committed_text, Util::HIRAGANA) &&
+      !Util::ContainsScriptType(committed_text, Util::KATAKANA) &&
+      !Util::ContainsScriptType(committed_text, Util::KANJI)) {
+    return;
+  }
+
+  const std::string hist_prefix = GetHistoryPrefix(&request, segments);
+
+  absl::MutexLock l(mutex_);
+  if (!model_ || !model_->is_loaded() || !indexer_) {
+    return;
+  }
+
+  const gruscorer::GruContext init_ctx =
+      ComputePrefixContext(*model_, *indexer_, hist_prefix, "");
+
+  gruscorer::TrainConfig train_cfg;
+  if (penalty_config.online_learning_mode == "full" ||
+      penalty_config.online_learning_mode == "full_bptt") {
+    train_cfg.mode = gruscorer::TrainMode::kFullBptt;
+  } else {
+    train_cfg.mode = gruscorer::TrainMode::kOutputOnly;
+  }
+  train_cfg.learning_rate =
+      static_cast<float>(penalty_config.online_learning_rate);
+  train_cfg.weight_decay =
+      static_cast<float>(penalty_config.online_learning_weight_decay);
+  train_cfg.max_grad_norm = 1.0f;
+
+  model_->TrainOnStringWithContext(*indexer_, committed_text, init_ctx, train_cfg);
+  last_revert_id_ = segments.revert_id();
+  ++unsaved_updates_count_;
+
+  if (penalty_config.online_learning_save_interval > 0 &&
+      unsaved_updates_count_ >= penalty_config.online_learning_save_interval &&
+      !user_model_path_.empty()) {
+    if (model_->SaveModel(user_model_path_)) {
+      unsaved_updates_count_ = 0;
+    }
+  }
+}
+
+void GruRewriter::Revert(const Segments& segments) {
+  absl::MutexLock l(mutex_);
+  if (!model_ || !model_->is_loaded() || !model_->has_revert_snapshot()) {
+    return;
+  }
+  if (segments.revert_id() != 0 && segments.revert_id() != last_revert_id_) {
+    return;
+  }
+  if (model_->RevertLastTrainStep()) {
+    last_revert_id_ = 0;
+    if (unsaved_updates_count_ > 0) {
+      --unsaved_updates_count_;
+    } else if (!user_model_path_.empty() &&
+               std::filesystem::exists(user_model_path_)) {
+      model_->SaveModel(user_model_path_);
+    }
+  }
+}
+
+bool GruRewriter::Sync() {
+  absl::MutexLock l(mutex_);
+  if (unsaved_updates_count_ > 0 && model_ && model_->is_loaded() &&
+      !user_model_path_.empty()) {
+    if (model_->SaveModel(user_model_path_)) {
+      unsaved_updates_count_ = 0;
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
+void GruRewriter::Clear() {
+  absl::MutexLock l(mutex_);
+  if (model_ && model_->is_loaded()) {
+    model_->ResetToBaseWeights();
+  }
+  unsaved_updates_count_ = 0;
+  last_revert_id_ = 0;
+
+  const std::string target_path =
+      user_model_path_.empty()
+          ? ResolveUserModelFilePath(absl::GetFlag(FLAGS_gru_user_model_path))
+          : user_model_path_;
+  if (!target_path.empty() && std::filesystem::exists(target_path)) {
+    std::error_code ec;
+    std::filesystem::remove(target_path, ec);
+  }
 }
 
 bool GruRewriter::Rewrite(const ConversionRequest& request,

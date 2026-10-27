@@ -43,6 +43,7 @@
 #include "converter/inner_segment.h"
 #include "converter/segments.h"
 #include "protocol/commands.pb.h"
+#include "protocol/config.pb.h"
 #include "request/conversion_request.h"
 #include "testing/gunit.h"
 #include "testing/mozctest.h"
@@ -870,6 +871,211 @@ TEST(GruRewriterResegmentTest, FocusTriggerResegmentWhenBetterCandidateFound) {
   EXPECT_EQ(segments.segment(1).key_len(), 3);  // "ここで"
   EXPECT_EQ(segments.segment(2).key_len(), 5);  // "はきものを"
   EXPECT_EQ(segments.segment(3).key_len(), 2);  // "ぬぐ"
+}
+
+TEST_F(GruRewriterTest, OnlineLearningImprovesRankingAndPersists) {
+  absl::SetFlag(&FLAGS_gru_model_path, "");
+  absl::SetFlag(&FLAGS_gru_chardata_path, "");
+  absl::SetFlag(&FLAGS_enable_gru_online_learning, true);
+  absl::SetFlag(&FLAGS_gru_score_weight, 800.0);
+
+  const std::string config_path = FileUtil::JoinPath(
+      std::filesystem::temp_directory_path().string(),
+      "gru_online_learn_config.ini");
+  const std::string user_model_path = FileUtil::JoinPath(
+      std::filesystem::temp_directory_path().string(),
+      "gru_online_user_model.bin");
+  std::error_code ec;
+  std::filesystem::remove(config_path, ec);
+  std::filesystem::remove(user_model_path, ec);
+
+  {
+    std::ofstream ofs(config_path);
+    ofs << "enable_online_learning = true\n"
+        << "online_learning_mode = output_only\n"
+        << "online_learning_rate = 0.2\n"
+        << "online_learning_weight_decay = 0.001\n"
+        << "online_learning_save_interval = 2\n";
+  }
+
+  absl::SetFlag(&FLAGS_gru_config_path, config_path);
+  absl::SetFlag(&FLAGS_gru_user_model_path, user_model_path);
+  ASSERT_TRUE(rewriter_->Reload());
+
+  auto make_eval_segments = [](Segments* segs) {
+    segs->Clear();
+    Segment* hist = segs->add_segment();
+    hist->set_key("さいしんの");
+    hist->set_segment_type(Segment::HISTORY);
+    AddCandidate("さいしんの", "最新の", 1000, hist);
+
+    Segment* conv = segs->add_segment();
+    conv->set_key("きかい");
+    conv->set_segment_type(Segment::FREE);
+    AddCandidate("きかい", "機会", 1000, conv);
+    AddCandidate("きかい", "機械", 1010, conv);
+  };
+
+  ConversionRequest request;
+  Segments eval_segments;
+  make_eval_segments(&eval_segments);
+  rewriter_->Rewrite(request, &eval_segments);
+
+  // Train on "最新の" + "機械" twice via Finish()
+  for (int step = 0; step < 2; ++step) {
+    Segments commit_segments;
+    Segment* hist = commit_segments.add_segment();
+    hist->set_key("さいしんの");
+    hist->set_segment_type(Segment::HISTORY);
+    AddCandidate("さいしんの", "最新の", 1000, hist);
+
+    Segment* fixed = commit_segments.add_segment();
+    fixed->set_key("きかい");
+    fixed->set_segment_type(Segment::FIXED_VALUE);
+    AddCandidate("きかい", "機械", 1100, fixed);
+    commit_segments.set_revert_id(100 + step);
+
+    rewriter_->Finish(request, commit_segments);
+  }
+
+  // Because save_interval = 2, user_model_path should now exist on disk
+  EXPECT_TRUE(std::filesystem::exists(user_model_path));
+
+  // Verify "機械" is now promoted to top candidate
+  make_eval_segments(&eval_segments);
+  EXPECT_TRUE(rewriter_->Rewrite(request, &eval_segments));
+  EXPECT_EQ(eval_segments.conversion_segment(0).candidate(0).value, "機械");
+
+  // Reload from disk and verify learned preference persists
+  ASSERT_TRUE(rewriter_->Reload());
+  make_eval_segments(&eval_segments);
+  EXPECT_TRUE(rewriter_->Rewrite(request, &eval_segments));
+  EXPECT_EQ(eval_segments.conversion_segment(0).candidate(0).value, "機械");
+
+  std::filesystem::remove(config_path, ec);
+  std::filesystem::remove(user_model_path, ec);
+  absl::SetFlag(&FLAGS_gru_config_path, "");
+  absl::SetFlag(&FLAGS_gru_user_model_path, "");
+}
+
+TEST_F(GruRewriterTest, OnlineLearningFullModeRevertAndClear) {
+  absl::SetFlag(&FLAGS_gru_model_path, "");
+  absl::SetFlag(&FLAGS_gru_chardata_path, "");
+  absl::SetFlag(&FLAGS_enable_gru_online_learning, true);
+  absl::SetFlag(&FLAGS_gru_score_weight, 800.0);
+
+  const std::string config_path = FileUtil::JoinPath(
+      std::filesystem::temp_directory_path().string(),
+      "gru_full_bptt_config.ini");
+  const std::string user_model_path = FileUtil::JoinPath(
+      std::filesystem::temp_directory_path().string(),
+      "gru_full_bptt_user.bin");
+  std::error_code ec;
+  std::filesystem::remove(config_path, ec);
+  std::filesystem::remove(user_model_path, ec);
+
+  {
+    std::ofstream ofs(config_path);
+    ofs << "enable_online_learning = true\n"
+        << "online_learning_mode = full\n"
+        << "online_learning_rate = 0.25\n"
+        << "online_learning_weight_decay = 0.001\n"
+        << "online_learning_save_interval = 10\n";
+  }
+
+  absl::SetFlag(&FLAGS_gru_config_path, config_path);
+  absl::SetFlag(&FLAGS_gru_user_model_path, user_model_path);
+  ASSERT_TRUE(rewriter_->Reload());
+
+  ConversionRequest request;
+
+  // Baseline evaluation before learning
+  Segments base_segments;
+  Segment* s0 = base_segments.add_segment();
+  s0->set_key("きょうは");
+  AddCandidate("きょうは", "今日は", 1000, s0);
+  rewriter_->Rewrite(request, &base_segments);
+  const std::string base_desc = base_segments.segment(0).candidate(0).description;
+
+  // Commit "今日は" with revert_id = 42
+  Segments commit_segments;
+  Segment* fixed = commit_segments.add_segment();
+  fixed->set_key("きょうは");
+  fixed->set_segment_type(Segment::FIXED_VALUE);
+  AddCandidate("きょうは", "今日は", 1000, fixed);
+  commit_segments.set_revert_id(42);
+  rewriter_->Finish(request, commit_segments);
+
+  // Description (GRU score) should change after Finish()
+  Segments trained_segments;
+  Segment* ts0 = trained_segments.add_segment();
+  ts0->set_key("きょうは");
+  AddCandidate("きょうは", "今日は", 1000, ts0);
+  rewriter_->Rewrite(request, &trained_segments);
+  const std::string trained_desc =
+      trained_segments.segment(0).candidate(0).description;
+  EXPECT_NE(trained_desc, base_desc);
+
+  // Revert with matching revert_id (42) must restore exact baseline score
+  rewriter_->Revert(commit_segments);
+  Segments reverted_segments;
+  Segment* rs0 = reverted_segments.add_segment();
+  rs0->set_key("きょうは");
+  AddCandidate("きょうは", "今日は", 1000, rs0);
+  rewriter_->Rewrite(request, &reverted_segments);
+  EXPECT_EQ(reverted_segments.segment(0).candidate(0).description, base_desc);
+
+  // Train again, Sync() to save user model, then Clear() to reset to base model
+  rewriter_->Finish(request, commit_segments);
+  EXPECT_TRUE(rewriter_->Sync());
+  EXPECT_TRUE(std::filesystem::exists(user_model_path));
+
+  rewriter_->Clear();
+  EXPECT_FALSE(std::filesystem::exists(user_model_path));
+
+  Segments cleared_segments;
+  Segment* cs0 = cleared_segments.add_segment();
+  cs0->set_key("きょうは");
+  AddCandidate("きょうは", "今日は", 1000, cs0);
+  rewriter_->Rewrite(request, &cleared_segments);
+  EXPECT_EQ(cleared_segments.segment(0).candidate(0).description, base_desc);
+
+  std::filesystem::remove(config_path, ec);
+  std::filesystem::remove(user_model_path, ec);
+  absl::SetFlag(&FLAGS_gru_config_path, "");
+  absl::SetFlag(&FLAGS_gru_user_model_path, "");
+}
+
+TEST_F(GruRewriterTest, OnlineLearningSkippedWhenNoHistoryLearningAttribute) {
+  absl::SetFlag(&FLAGS_gru_model_path, "");
+  absl::SetFlag(&FLAGS_gru_chardata_path, "");
+  absl::SetFlag(&FLAGS_enable_gru_online_learning, true);
+  ASSERT_TRUE(rewriter_->Reload());
+
+  ConversionRequest request;
+  Segments base_segments;
+  Segment* s0 = base_segments.add_segment();
+  s0->set_key("きょうは");
+  AddCandidate("きょうは", "今日は", 1000, s0);
+  rewriter_->Rewrite(request, &base_segments);
+  const std::string base_desc = base_segments.segment(0).candidate(0).description;
+
+  // Candidate marked with NO_HISTORY_LEARNING should not trigger online training
+  Segments commit_segments;
+  Segment* fixed = commit_segments.add_segment();
+  fixed->set_key("きょうは");
+  fixed->set_segment_type(Segment::FIXED_VALUE);
+  AddCandidate("きょうは", "今日は", 1000, fixed);
+  fixed->mutable_candidate(0)->attributes |=
+      converter::Attribute::NO_HISTORY_LEARNING;
+  rewriter_->Finish(request, commit_segments);
+
+  Segments after_segments;
+  Segment* as0 = after_segments.add_segment();
+  as0->set_key("きょうは");
+  AddCandidate("きょうは", "今日は", 1000, as0);
+  rewriter_->Rewrite(request, &after_segments);
+  EXPECT_EQ(after_segments.segment(0).candidate(0).description, base_desc);
 }
 
 }  // namespace

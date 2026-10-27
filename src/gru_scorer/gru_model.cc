@@ -31,14 +31,51 @@
 #include "gru_scorer/math_ops.hh"
 #include "gru_scorer/charindex.hh"
 
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <vector>
 
 namespace gruscorer
 {
+namespace
+{
+
+float *AllocateAlignedFloats(size_t num_elements) noexcept
+{
+    if (num_elements == 0)
+    {
+        return nullptr;
+    }
+    const size_t total_bytes = num_elements * sizeof(float);
+    float *raw_buf = nullptr;
+#if defined(_MSC_VER)
+    raw_buf = static_cast<float *>(_aligned_malloc(total_bytes, 64));
+#else
+    if (posix_memalign(reinterpret_cast<void **>(&raw_buf), 64, total_bytes) != 0)
+    {
+        return nullptr;
+    }
+#endif
+    return raw_buf;
+}
+
+uint64_t ComputeFnv1a64(const void *data, size_t num_bytes, uint64_t seed = 14695981039346656037ULL) noexcept
+{
+    const uint8_t *bytes = static_cast<const uint8_t *>(data);
+    uint64_t hash = seed;
+    for (size_t i = 0; i < num_bytes; ++i)
+    {
+        hash ^= static_cast<uint64_t>(bytes[i]);
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+} // namespace
 
 void GruModel::AlignedDeleter::operator()(float *ptr) const noexcept
 {
@@ -60,6 +97,7 @@ GruModel &GruModel::operator=(GruModel &&) noexcept = default;
 bool GruModel::LoadModel(const std::string &path)
 {
     is_loaded_ = false;
+    has_revert_snapshot_ = false;
 
     std::ifstream fin(path, std::ios::binary);
     if (!fin.is_open())
@@ -101,29 +139,36 @@ bool GruModel::LoadModel(const std::string &path)
     const size_t total_elements = size_emb + size_ih + size_hh + size_bih + size_bhh + size_out + size_bout;
     const size_t total_bytes = total_elements * sizeof(float);
 
-    float *raw_buf = nullptr;
-#if defined(_MSC_VER)
-    raw_buf = static_cast<float *>(_aligned_malloc(total_bytes, 64));
-#else
-    if (posix_memalign(reinterpret_cast<void **>(&raw_buf), 64, total_bytes) != 0)
-    {
-        return false;
-    }
-#endif
+    float *raw_buf = AllocateAlignedFloats(total_elements);
+    float *base_buf = AllocateAlignedFloats(total_elements);
+    float *revert_buf = AllocateAlignedFloats(total_elements);
 
-    if (raw_buf == nullptr)
+    if (raw_buf == nullptr || base_buf == nullptr || revert_buf == nullptr)
     {
+        AlignedDeleter deleter;
+        if (raw_buf) deleter(raw_buf);
+        if (base_buf) deleter(base_buf);
+        if (revert_buf) deleter(revert_buf);
         return false;
     }
 
     weights_buffer_.reset(raw_buf);
+    base_weights_buffer_.reset(base_buf);
+    revert_weights_buffer_.reset(revert_buf);
 
     fin.read(reinterpret_cast<char *>(raw_buf), total_bytes);
     if (static_cast<size_t>(fin.gcount()) != total_bytes)
     {
         weights_buffer_.reset();
+        base_weights_buffer_.reset();
+        revert_weights_buffer_.reset();
         return false;
     }
+
+    std::memcpy(base_buf, raw_buf, total_bytes);
+    std::memcpy(revert_buf, raw_buf, total_bytes);
+    total_elements_ = total_elements;
+    base_model_hash_ = ComputeFnv1a64(raw_buf, total_bytes);
 
     // Map weight pointers
     float *ptr = raw_buf;
@@ -137,6 +182,129 @@ bool GruModel::LoadModel(const std::string &path)
 
     is_loaded_ = true;
     return true;
+}
+
+bool GruModel::LoadUserWeights(const std::string &path)
+{
+    if (!is_loaded_ || !weights_buffer_ || total_elements_ == 0)
+    {
+        return false;
+    }
+
+    std::ifstream fin(path, std::ios::binary);
+    if (!fin.is_open())
+    {
+        return false;
+    }
+
+    ModelHeader header;
+    fin.read(reinterpret_cast<char *>(&header), sizeof(ModelHeader));
+    if (fin.gcount() != sizeof(ModelHeader))
+    {
+        return false;
+    }
+
+    if (std::memcmp(header.magic, kMagic, 4) != 0 ||
+        header.version != kCurrentVersion ||
+        header.data_type != kDataTypeFp32 ||
+        header.vocab_size != vocab_size_ ||
+        header.hidden_size != hidden_size_)
+    {
+        return false;
+    }
+
+    uint64_t saved_base_hash = 0;
+    std::memcpy(&saved_base_hash, header.reserved, sizeof(uint64_t));
+    if (saved_base_hash != 0 && saved_base_hash != base_model_hash_)
+    {
+        return false;
+    }
+
+    const size_t total_bytes = total_elements_ * sizeof(float);
+    std::vector<float> tmp_buf(total_elements_);
+    fin.read(reinterpret_cast<char *>(tmp_buf.data()), total_bytes);
+    if (static_cast<size_t>(fin.gcount()) != total_bytes)
+    {
+        return false;
+    }
+
+    std::memcpy(weights_buffer_.get(), tmp_buf.data(), total_bytes);
+    has_revert_snapshot_ = false;
+    return true;
+}
+
+bool GruModel::SaveModel(const std::string &path) const
+{
+    if (!is_loaded_ || !weights_buffer_ || total_elements_ == 0 || path.empty())
+    {
+        return false;
+    }
+
+    std::error_code ec;
+    const std::filesystem::path target_path(path);
+    if (target_path.has_parent_path())
+    {
+        std::filesystem::create_directories(target_path.parent_path(), ec);
+    }
+
+    const std::string tmp_path = path + ".tmp";
+    {
+        std::ofstream fout(tmp_path, std::ios::binary | std::ios::trunc);
+        if (!fout.is_open())
+        {
+            return false;
+        }
+
+        ModelHeader header{};
+        std::memcpy(header.magic, kMagic, 4);
+        header.version = kCurrentVersion;
+        header.vocab_size = vocab_size_;
+        header.hidden_size = hidden_size_;
+        header.data_type = kDataTypeFp32;
+        std::memcpy(header.reserved, &base_model_hash_, sizeof(uint64_t));
+
+        fout.write(reinterpret_cast<const char *>(&header), sizeof(ModelHeader));
+        fout.write(reinterpret_cast<const char *>(weights_buffer_.get()),
+                   total_elements_ * sizeof(float));
+        fout.flush();
+        if (!fout.good())
+        {
+            fout.close();
+            std::filesystem::remove(tmp_path, ec);
+            return false;
+        }
+    }
+
+    std::filesystem::rename(tmp_path, path, ec);
+    if (ec)
+    {
+        std::filesystem::remove(tmp_path, ec);
+        return false;
+    }
+    return true;
+}
+
+bool GruModel::RevertLastTrainStep()
+{
+    if (!is_loaded_ || !has_revert_snapshot_ || !revert_weights_buffer_ || !weights_buffer_)
+    {
+        return false;
+    }
+    std::memcpy(weights_buffer_.get(), revert_weights_buffer_.get(),
+                total_elements_ * sizeof(float));
+    has_revert_snapshot_ = false;
+    return true;
+}
+
+void GruModel::ResetToBaseWeights()
+{
+    if (!is_loaded_ || !base_weights_buffer_ || !weights_buffer_)
+    {
+        return;
+    }
+    std::memcpy(weights_buffer_.get(), base_weights_buffer_.get(),
+                total_elements_ * sizeof(float));
+    has_revert_snapshot_ = false;
 }
 
 void GruModel::ForwardGruCell(uint16_t token_id,
@@ -467,6 +635,356 @@ float GruModel::ScoreString(const charindex::CharIndex &indexer,
     }
 
     return total_log_prob;
+}
+
+float GruModel::TrainOnStringWithContext(const charindex::CharIndex &indexer,
+                                         std::string_view utf8_str,
+                                         const GruContext &context,
+                                         const TrainConfig &config)
+{
+    if (!is_loaded_ || utf8_str.empty())
+    {
+        return 0.0f;
+    }
+
+    std::vector<uint16_t> token_ids;
+    token_ids.reserve(utf8_str.size());
+
+    std::string_view remaining = utf8_str;
+    while (!remaining.empty())
+    {
+        size_t bytes_consumed = 0;
+        char32_t cp = indexer.DecodeUtf8Char(remaining, bytes_consumed);
+        if (bytes_consumed == 0)
+        {
+            break;
+        }
+        token_ids.push_back(indexer.Char2Index(cp));
+        remaining.remove_prefix(bytes_consumed);
+    }
+
+    if (token_ids.empty())
+    {
+        return 0.0f;
+    }
+
+    constexpr size_t kMaxTrainTokens = 256;
+    if (token_ids.size() > kMaxTrainTokens)
+    {
+        token_ids.resize(kMaxTrainTokens);
+    }
+
+    const size_t T = token_ids.size();
+    const size_t H = hidden_size_;
+    const size_t V = vocab_size_;
+    const size_t H3 = 3 * H;
+
+    size_t valid_targets = 0;
+    for (size_t t = 0; t < T; ++t)
+    {
+        if (token_ids[t] >= V)
+        {
+            token_ids[t] = kUnkTokenId;
+        }
+        if (token_ids[t] != kUnkTokenId)
+        {
+            ++valid_targets;
+        }
+    }
+
+    // If learning is disabled or all targets are <unk>, just return normalized score.
+    if (valid_targets == 0 || config.learning_rate <= 0.0f)
+    {
+        return ScoreStringWithContext(indexer, utf8_str, context, true);
+    }
+
+    // Snapshot current weights for RevertLastTrainStep()
+    if (revert_weights_buffer_ && weights_buffer_)
+    {
+        std::memcpy(revert_weights_buffer_.get(), weights_buffer_.get(),
+                    total_elements_ * sizeof(float));
+        has_revert_snapshot_ = true;
+    }
+
+    const bool full_bptt = (config.mode == TrainMode::kFullBptt);
+    const float inv_valid = 1.0f / static_cast<float>(valid_targets);
+
+    const size_t size_emb = V * H;
+    const size_t size_ih  = 3 * H * H;
+    const size_t size_hh  = 3 * H * H;
+    const size_t size_bih = 3 * H;
+    const size_t size_bhh = 3 * H;
+    const size_t size_out = V * H;
+    const size_t size_bout = V;
+
+    // Allocate gradient buffers
+    std::vector<float> grad_all;
+    std::vector<float> grad_out_only;
+    float *g_emb = nullptr;
+    float *g_ih  = nullptr;
+    float *g_hh  = nullptr;
+    float *g_bih = nullptr;
+    float *g_bhh = nullptr;
+    float *g_out = nullptr;
+    float *g_bout = nullptr;
+
+    if (full_bptt)
+    {
+        grad_all.assign(total_elements_, 0.0f);
+        float *gptr = grad_all.data();
+        g_emb  = gptr; gptr += size_emb;
+        g_ih   = gptr; gptr += size_ih;
+        g_hh   = gptr; gptr += size_hh;
+        g_bih  = gptr; gptr += size_bih;
+        g_bhh  = gptr; gptr += size_bhh;
+        g_out  = gptr; gptr += size_out;
+        g_bout = gptr;
+    }
+    else
+    {
+        grad_out_only.assign(size_out + size_bout, 0.0f);
+        g_out  = grad_out_only.data();
+        g_bout = grad_out_only.data() + size_out;
+    }
+
+    // Forward trajectory buffers for BPTT
+    std::vector<uint16_t> x_tokens(T, kBosTokenId);
+    std::vector<float> h_prev_hist;
+    std::vector<float> r_hist;
+    std::vector<float> z_hist;
+    std::vector<float> n_hist;
+    std::vector<float> ghn_hist;
+    std::vector<float> dh_out_hist;
+
+    if (full_bptt)
+    {
+        h_prev_hist.assign(T * H, 0.0f);
+        r_hist.assign(T * H, 0.0f);
+        z_hist.assign(T * H, 0.0f);
+        n_hist.assign(T * H, 0.0f);
+        ghn_hist.assign(T * H, 0.0f);
+        dh_out_hist.assign(T * H, 0.0f);
+    }
+
+    std::vector<float> h_curr(H, 0.0f);
+    std::vector<float> h_next(H, 0.0f);
+    uint16_t prev_token = kBosTokenId;
+    bool has_initial_h = false;
+
+    if (!context.is_empty && context.h.size() == H)
+    {
+        std::memcpy(h_curr.data(), context.h.data(), H * sizeof(float));
+        prev_token = (context.last_token < V) ? context.last_token : kUnkTokenId;
+        has_initial_h = true;
+    }
+
+    std::vector<float> gi(H3, 0.0f);
+    std::vector<float> gh(H3, 0.0f);
+    std::vector<float> logits(V, 0.0f);
+    std::vector<float> dl(V, 0.0f);
+
+    float total_log_prob = 0.0f;
+
+    for (size_t t = 0; t < T; ++t)
+    {
+        const uint16_t x_t = (prev_token < V) ? prev_token : kUnkTokenId;
+        const uint16_t y_t = token_ids[t];
+        x_tokens[t] = x_t;
+
+        const float *e_t = &w_emb_[static_cast<size_t>(x_t) * H];
+        math::Gemv(w_ih_, e_t, b_ih_, gi.data(), H3, H);
+
+        if (t > 0 || has_initial_h)
+        {
+            math::Gemv(w_hh_, h_curr.data(), b_hh_, gh.data(), H3, H);
+        }
+        else
+        {
+            std::memcpy(gh.data(), b_hh_, H3 * sizeof(float));
+        }
+
+        const float *gi_r = gi.data();
+        const float *gi_z = gi.data() + H;
+        const float *gi_n = gi.data() + 2 * H;
+
+        const float *gh_r = gh.data();
+        const float *gh_z = gh.data() + H;
+        const float *gh_n = gh.data() + 2 * H;
+
+        for (size_t j = 0; j < H; ++j)
+        {
+            const float r = math::Sigmoid(gi_r[j] + gh_r[j]);
+            const float z = math::Sigmoid(gi_z[j] + gh_z[j]);
+            const float n = std::tanh(gi_n[j] + r * gh_n[j]);
+            h_next[j] = (1.0f - z) * n + z * h_curr[j];
+
+            if (full_bptt)
+            {
+                h_prev_hist[t * H + j] = h_curr[j];
+                r_hist[t * H + j] = r;
+                z_hist[t * H + j] = z;
+                n_hist[t * H + j] = n;
+                ghn_hist[t * H + j] = gh_n[j];
+            }
+        }
+
+        // Output layer forward
+        math::Gemv(w_out_, h_next.data(), b_out_, logits.data(), V, H);
+        const float log_denom = math::ComputeLogSumExp(logits.data(), V);
+        float token_log_prob = logits[y_t] - log_denom;
+
+        if (y_t == kUnkTokenId)
+        {
+            token_log_prob = std::min(token_log_prob, -6.0f) - 6.0f;
+        }
+        else
+        {
+            // Compute dlogits = (softmax(logits) - one_hot(y_t)) / valid_targets
+            for (size_t v = 0; v < V; ++v)
+            {
+                const float p_v = std::exp(logits[v] - log_denom);
+                const float dl_v = (p_v - ((v == y_t) ? 1.0f : 0.0f)) * inv_valid;
+                dl[v] = dl_v;
+                g_bout[v] += dl_v;
+                math::Axpy(dl_v, h_next.data(), &g_out[v * H], H);
+            }
+
+            if (full_bptt)
+            {
+                math::GemvTransposedAdd(w_out_, dl.data(), &dh_out_hist[t * H], V, H);
+            }
+        }
+
+        total_log_prob += token_log_prob;
+        prev_token = y_t;
+        std::swap(h_curr, h_next);
+    }
+
+    if (full_bptt)
+    {
+        std::vector<float> dh_next(H, 0.0f);
+        std::vector<float> dh(H, 0.0f);
+        std::vector<float> dgi(H3, 0.0f);
+        std::vector<float> dgh(H3, 0.0f);
+
+        for (size_t step = T; step > 0; --step)
+        {
+            const size_t t = step - 1;
+            const uint16_t x_t = x_tokens[t];
+            const float *e_t = &w_emb_[static_cast<size_t>(x_t) * H];
+            const float *h_prev_t = &h_prev_hist[t * H];
+            const float *r_t = &r_hist[t * H];
+            const float *z_t = &z_hist[t * H];
+            const float *n_t = &n_hist[t * H];
+            const float *ghn_t = &ghn_hist[t * H];
+            const float *dh_out_t = &dh_out_hist[t * H];
+
+            float *dgi_r = dgi.data();
+            float *dgi_z = dgi.data() + H;
+            float *dgi_n = dgi.data() + 2 * H;
+
+            float *dgh_r = dgh.data();
+            float *dgh_z = dgh.data() + H;
+            float *dgh_n = dgh.data() + 2 * H;
+
+            for (size_t j = 0; j < H; ++j)
+            {
+                const float dh_j = dh_out_t[j] + dh_next[j];
+                dh[j] = dh_j;
+
+                const float r = r_t[j];
+                const float z = z_t[j];
+                const float n = n_t[j];
+
+                const float dn = dh_j * (1.0f - z);
+                const float dz = dh_j * (h_prev_t[j] - n);
+
+                const float dgn = dn * (1.0f - n * n);
+                const float dgz = dz * z * (1.0f - z);
+                const float dr = dgn * ghn_t[j];
+                const float dgr = dr * r * (1.0f - r);
+
+                dgi_r[j] = dgr;
+                dgi_z[j] = dgz;
+                dgi_n[j] = dgn;
+
+                dgh_r[j] = dgr;
+                dgh_z[j] = dgz;
+                dgh_n[j] = dgn * r;
+
+                dh_next[j] = dh_j * z;
+            }
+
+            // Accumulate bias gradients
+            math::Axpy(1.0f, dgi.data(), g_bih, H3);
+            math::Axpy(1.0f, dgh.data(), g_bhh, H3);
+
+            // Accumulate W_ih and W_hh gradients
+            for (size_t k = 0; k < H3; ++k)
+            {
+                math::Axpy(dgi[k], e_t, &g_ih[k * H], H);
+                math::Axpy(dgh[k], h_prev_t, &g_hh[k * H], H);
+            }
+
+            // Accumulate W_emb gradient for x_t
+            math::GemvTransposedAdd(w_ih_, dgi.data(), &g_emb[static_cast<size_t>(x_t) * H], H3, H);
+
+            // Propagate gradient to h_{t-1}
+            math::GemvTransposedAdd(w_hh_, dgh.data(), dh_next.data(), H3, H);
+        }
+
+        // Global gradient norm clipping and L2 anchor SGD update over all weights
+        const float grad_norm_sq = math::DotProduct(grad_all.data(), grad_all.data(), total_elements_);
+        const float grad_norm = std::sqrt(grad_norm_sq);
+        float grad_scale = 1.0f;
+        if (config.max_grad_norm > 0.0f && grad_norm > config.max_grad_norm)
+        {
+            grad_scale = config.max_grad_norm / grad_norm;
+        }
+
+        const float eff_lr = config.learning_rate * grad_scale;
+        const float anchor_decay = config.learning_rate * config.weight_decay;
+        float *w_ptr = weights_buffer_.get();
+        const float *base_ptr = base_weights_buffer_.get();
+
+        for (size_t i = 0; i < total_elements_; ++i)
+        {
+            w_ptr[i] -= eff_lr * grad_all[i] + anchor_decay * (w_ptr[i] - base_ptr[i]);
+        }
+    }
+    else
+    {
+        // Output-only gradient norm clipping and L2 anchor SGD update
+        const size_t out_elements = size_out + size_bout;
+        const float grad_norm_sq = math::DotProduct(grad_out_only.data(), grad_out_only.data(), out_elements);
+        const float grad_norm = std::sqrt(grad_norm_sq);
+        float grad_scale = 1.0f;
+        if (config.max_grad_norm > 0.0f && grad_norm > config.max_grad_norm)
+        {
+            grad_scale = config.max_grad_norm / grad_norm;
+        }
+
+        const float eff_lr = config.learning_rate * grad_scale;
+        const float anchor_decay = config.learning_rate * config.weight_decay;
+        const size_t out_offset = size_emb + size_ih + size_hh + size_bih + size_bhh;
+        float *w_out_ptr = weights_buffer_.get() + out_offset;
+        const float *base_out_ptr = base_weights_buffer_.get() + out_offset;
+
+        for (size_t i = 0; i < out_elements; ++i)
+        {
+            w_out_ptr[i] -= eff_lr * grad_out_only[i] + anchor_decay * (w_out_ptr[i] - base_out_ptr[i]);
+        }
+    }
+
+    return total_log_prob / static_cast<float>(T);
+}
+
+float GruModel::TrainOnString(const charindex::CharIndex &indexer,
+                              std::string_view utf8_str,
+                              const TrainConfig &config)
+{
+    GruContext empty_ctx;
+    return TrainOnStringWithContext(indexer, utf8_str, empty_ctx, config);
 }
 
 } // namespace gruscorer
