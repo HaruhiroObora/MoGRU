@@ -1,4 +1,4 @@
-[MoGRU - Neural Language Model Integrated Mozc](https://github.com/HaruhiroObora/MoGRU)
+[MoGRU - Neural Language Model Integrated Mozc](https://github.com/lambda-haru/MoGRU)
 ========================================================================
 
 本リポジトリは、オープンソースかな漢字変換エンジン **Mozc** に、**文字単位 GRU ニューラル言語モデル（GRU Scorer）** を統合した拡張版 **MoGRU** です。
@@ -72,7 +72,7 @@ macOS 標準日本語入力でおなじみの「**ライブ変換**」を MoGRU 
 
 ### 🐧 Linux (Fcitx5)
 ```bash
-git clone https://github.com/HaruhiroObora/MoGRU.git
+git clone https://github.com/lambda-haru/MoGRU.git
 cd MoGRU
 ./install.sh
 # または: ./scripts/install_linux.sh
@@ -86,7 +86,7 @@ cd MoGRU
 
 ### 🍎 macOS
 ```bash
-git clone https://github.com/HaruhiroObora/MoGRU.git
+git clone https://github.com/lambda-haru/MoGRU.git
 cd MoGRU
 ./install.sh
 # または: ./scripts/install_macos.sh
@@ -102,7 +102,7 @@ cd MoGRU
 
 ### 🪟 Windows (PowerShell)
 ```powershell
-git clone https://github.com/HaruhiroObora/MoGRU.git
+git clone https://github.com/lambda-haru/MoGRU.git
 cd MoGRU
 Set-ExecutionPolicy Bypass -Scope Process -Force
 .\scripts\install_windows.ps1
@@ -122,7 +122,7 @@ Build Status
 
 | Linux | Windows | macOS |
 |:-----:|:-------:|:-----:|
-| [![Linux](https://github.com/HaruhiroObora/MoGRU/actions/workflows/linux.yaml/badge.svg)](https://github.com/HaruhiroObora/MoGRU/actions/workflows/linux.yaml) | [![Windows](https://github.com/HaruhiroObora/MoGRU/actions/workflows/windows.yaml/badge.svg)](https://github.com/HaruhiroObora/MoGRU/actions/workflows/windows.yaml) | [![macOS](https://github.com/HaruhiroObora/MoGRU/actions/workflows/macos.yaml/badge.svg)](https://github.com/HaruhiroObora/MoGRU/actions/workflows/macos.yaml) |
+| [![Linux](https://github.com/lambda-haru/MoGRU/actions/workflows/linux.yaml/badge.svg)](https://github.com/lambda-haru/MoGRU/actions/workflows/linux.yaml) | [![Windows](https://github.com/lambda-haru/MoGRU/actions/workflows/windows.yaml/badge.svg)](https://github.com/lambda-haru/MoGRU/actions/workflows/windows.yaml) | [![macOS](https://github.com/lambda-haru/MoGRU/actions/workflows/macos.yaml/badge.svg)](https://github.com/lambda-haru/MoGRU/actions/workflows/macos.yaml) |
 
 
 What's Mozc?
