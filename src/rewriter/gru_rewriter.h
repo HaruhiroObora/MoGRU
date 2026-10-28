@@ -39,6 +39,7 @@
 #include "absl/flags/declare.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
+#include "config/gru_config.h"
 #include "converter/segments.h"
 #include "request/conversion_request.h"
 #include "rewriter/rewriter_interface.h"
@@ -47,6 +48,7 @@ ABSL_DECLARE_FLAG(bool, enable_gru_rewriter);
 ABSL_DECLARE_FLAG(bool, enable_gru_resegmentation);
 ABSL_DECLARE_FLAG(bool, enable_gru_online_learning);
 ABSL_DECLARE_FLAG(int32_t, gru_resegment_cost_threshold);
+ABSL_DECLARE_FLAG(bool, show_gru_score);
 ABSL_DECLARE_FLAG(double, gru_score_weight);
 ABSL_DECLARE_FLAG(double, gru_katakana_multiplier);
 ABSL_DECLARE_FLAG(double, gru_hiragana_multiplier);
@@ -66,21 +68,6 @@ class CharIndex;
 namespace mozc {
 
 class ImmutableConverterInterface;
-
-struct GruPenaltyConfig {
-  double katakana_multiplier = 1.3;
-  double hiragana_multiplier = 1.1;
-  double hiragana_length_power = 1.0;
-  double emoji_penalty = 15000.0;
-  double alphabet_multiplier = 2.0;
-  bool enable_resegmentation = true;
-  double resegment_threshold = 600.0;
-  bool enable_online_learning = true;
-  std::string online_learning_mode = "output_only";
-  double online_learning_rate = 0.005;
-  double online_learning_weight_decay = 0.001;
-  int32_t online_learning_save_interval = 5;
-};
 
 class GruRewriter : public RewriterInterface {
  public:
@@ -151,6 +138,7 @@ class GruRewriter : public RewriterInterface {
   mutable absl::Time last_config_check_time_ ABSL_GUARDED_BY(mutex_) = absl::InfinitePast();
   mutable uint64_t last_revert_id_ ABSL_GUARDED_BY(mutex_) = 0;
   mutable int32_t unsaved_updates_count_ ABSL_GUARDED_BY(mutex_) = 0;
+  mutable bool loaded_has_user_model_ ABSL_GUARDED_BY(mutex_) = false;
   mutable bool is_initialized_ ABSL_GUARDED_BY(mutex_) = false;
 
   const ImmutableConverterInterface* immutable_converter_ = nullptr;

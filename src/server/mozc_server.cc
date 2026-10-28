@@ -50,6 +50,7 @@
 
 ABSL_DECLARE_FLAG(bool, restricted);  // in SessionHandler
 ABSL_DECLARE_FLAG(bool, enable_gru_rewriter);  // in GruRewriter
+ABSL_DECLARE_FLAG(bool, enable_live_conversion);  // in EngineConverter
 
 namespace {
 mozc::SessionServer *g_session_server = nullptr;
@@ -86,8 +87,9 @@ void InitMozcAndMozcServer(const char *arg0, int *argc, char ***argv,
 
   mozc::InitMozc(arg0, argc, argv);
 
-  // Enable GRU neural language model rewriter in mozc_server.
+  // Enable GRU neural language model rewriter and live conversion in mozc_server.
   absl::SetFlag(&FLAGS_enable_gru_rewriter, true);
+  absl::SetFlag(&FLAGS_enable_live_conversion, true);
 
   if (run_level == mozc::RunLevel::RESTRICTED) {
     MOZC_VLOG(1) << "Mozc server starts with timeout mode";

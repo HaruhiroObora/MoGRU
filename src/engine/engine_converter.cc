@@ -52,6 +52,7 @@
 #include "base/vlog.h"
 #include "composer/composer.h"
 #include "config/config_handler.h"
+#include "config/gru_config.h"
 #include "converter/attribute.h"
 #include "converter/candidate.h"
 #include "converter/converter_interface.h"
@@ -514,7 +515,8 @@ bool EngineConverter::Suggest(const composer::Composer& composer,
 
   // Live conversion: convert the confirmed kana portion inline while hiding
   // the candidate window during composition.
-  if (absl::GetFlag(FLAGS_enable_live_conversion)) {
+  if (absl::GetFlag(FLAGS_enable_live_conversion) &&
+      config::GruConfigManager::IsLiveConversionEnabled(true)) {
     if (composer.Empty() ||
         composer.GetInputMode() != transliteration::HIRAGANA ||
         composer.GetOutputMode() != transliteration::HIRAGANA ||

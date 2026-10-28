@@ -30,6 +30,8 @@
 // Qt component of configure dialog for Mozc
 #include "gui/config_dialog/config_dialog.h"
 
+#include <QFileDialog>
+#include <QLocale>
 #include <QMessageBox>
 #include <algorithm>
 #include <cstdint>
@@ -43,8 +45,10 @@
 #include "absl/log/log.h"
 #include "absl/strings/string_view.h"
 #include "base/config_file_stream.h"
+#include "base/file_util.h"
 #include "client/client.h"
 #include "config/config_handler.h"
+#include "config/gru_config.h"
 #include "gui/base/stats_config_util.h"
 #include "gui/base/util.h"
 #include "gui/config_dialog/keymap_editor.h"
@@ -132,9 +136,11 @@ ConfigDialog::ConfigDialog()
   miscLoggingWidget->setVisible(false);
 
 #if defined(__linux__)
-  // The last "misc" tab has no valid configs on Linux
-  constexpr int kMiscTabIndex = 6;
-  configDialogTabWidget->removeTab(kMiscTabIndex);
+  // The "misc" tab has no valid configs on Linux
+  const int misc_tab_index = configDialogTabWidget->indexOf(miscTab);
+  if (misc_tab_index >= 0) {
+    configDialogTabWidget->removeTab(misc_tab_index);
+  }
 #endif  // __linux__
 #endif  // NDEBUG
 
@@ -242,6 +248,18 @@ ConfigDialog::ConfigDialog()
                    SLOT(LaunchAdministrationDialog()));
   QObject::connect(launchAdministrationDialogButtonForUsageStats,
                    SIGNAL(clicked()), this, SLOT(LaunchAdministrationDialog()));
+  QObject::connect(browseGruModelPathButton, SIGNAL(clicked()), this,
+                   SLOT(BrowseGruModelPath()));
+  QObject::connect(browseGruChardataPathButton, SIGNAL(clicked()), this,
+                   SLOT(BrowseGruChardataPath()));
+  QObject::connect(browseGruUserModelPathButton, SIGNAL(clicked()), this,
+                   SLOT(BrowseGruUserModelPath()));
+  QObject::connect(resetGruUserModelButton, SIGNAL(clicked()), this,
+                   SLOT(ResetGruUserModel()));
+  QObject::connect(reloadGruConfigButton, SIGNAL(clicked()), this,
+                   SLOT(ReloadGruConfigFromDisk()));
+
+  SetupMogruUi();
 
   // Event handlers to enable 'Apply' button.
   Connect(findChildren<QPushButton*>(), SIGNAL(clicked()), this,
@@ -251,6 +269,14 @@ ConfigDialog::ConfigDialog()
   Connect(findChildren<QComboBox*>(), SIGNAL(activated(int)), this,
           SLOT(EnableApplyButton()));
   Connect(findChildren<QSpinBox*>(), SIGNAL(editingFinished()), this,
+          SLOT(EnableApplyButton()));
+  Connect(findChildren<QSpinBox*>(), SIGNAL(valueChanged(int)), this,
+          SLOT(EnableApplyButton()));
+  Connect(findChildren<QDoubleSpinBox*>(), SIGNAL(editingFinished()), this,
+          SLOT(EnableApplyButton()));
+  Connect(findChildren<QDoubleSpinBox*>(), SIGNAL(valueChanged(double)), this,
+          SLOT(EnableApplyButton()));
+  Connect(findChildren<QLineEdit*>(), SIGNAL(textEdited(QString)), this,
           SLOT(EnableApplyButton()));
   // 'Apply' button is disabled on launching.
   configDialogButtonBox->button(QDialogButtonBox::Apply)->setEnabled(false);
@@ -309,6 +335,11 @@ ConfigDialog::ConfigDialog()
 
   Reload();
 
+  gru_config_watch_timer_ = new QTimer(this);
+  QObject::connect(gru_config_watch_timer_, SIGNAL(timeout()), this,
+                   SLOT(CheckGruConfigFileModified()));
+  gru_config_watch_timer_->start(1000);
+
 #ifdef _WIN32
   IMEHotKeyDisabledCheckBox->setChecked(WinUtil::GetIMEHotKeyDisabled());
 #else   // _WIN32
@@ -321,31 +352,55 @@ ConfigDialog::ConfigDialog()
 }
 
 bool ConfigDialog::SetConfig(const config::Config& config) {
+#ifdef __linux__
+  // On Linux, fcitx5-mogru.so runs in-process (use_server=False), so write
+  // config1.db directly via ConfigHandler first to avoid spawning/mismatching
+  // against a system-wide /usr/lib/mozc/mozc_server.
+  config::ConfigHandler::SetConfig(config);
+  return true;
+#else
   if (!client_->CheckVersionOrRestartServer()) {
-    LOG(ERROR) << "CheckVersionOrRestartServer failed";
-    return false;
+    LOG(WARNING) << "CheckVersionOrRestartServer failed; falling back to "
+                    "direct ConfigHandler::SetConfig";
+    config::ConfigHandler::SetConfig(config);
+    return true;
   }
 
   if (!client_->SetConfig(config)) {
-    LOG(ERROR) << "SetConfig failed";
-    return false;
+    LOG(WARNING) << "client_->SetConfig failed; falling back to "
+                    "direct ConfigHandler::SetConfig";
+    config::ConfigHandler::SetConfig(config);
+    return true;
   }
 
   return true;
+#endif
 }
 
 bool ConfigDialog::GetConfig(config::Config* config) {
+#ifdef __linux__
+  config::ConfigHandler::Reload();
+  *config = config::ConfigHandler::GetCopiedConfig();
+  return true;
+#else
   if (!client_->CheckVersionOrRestartServer()) {
-    LOG(ERROR) << "CheckVersionOrRestartServer failed";
-    return false;
+    LOG(WARNING) << "CheckVersionOrRestartServer failed; falling back to "
+                    "direct ConfigHandler::GetConfig";
+    config::ConfigHandler::Reload();
+    *config = config::ConfigHandler::GetCopiedConfig();
+    return true;
   }
 
   if (!client_->GetConfig(config)) {
-    LOG(ERROR) << "GetConfig failed";
-    return false;
+    LOG(WARNING) << "client_->GetConfig failed; falling back to "
+                    "direct ConfigHandler::GetConfig";
+    config::ConfigHandler::Reload();
+    *config = config::ConfigHandler::GetCopiedConfig();
+    return true;
   }
 
   return true;
+#endif
 }
 
 void ConfigDialog::Reload() {
@@ -355,6 +410,7 @@ void ConfigDialog::Reload() {
                           tr("Failed to get current config values."));
   }
   ConvertFromProto(config);
+  ReloadGruConfigFromDisk();
 
   SelectAutoConversionSetting(static_cast<int>(config.use_auto_conversion()));
 
@@ -403,6 +459,18 @@ bool ConfigDialog::Update() {
     QMessageBox::critical(this, windowTitle(), tr("Failed to update config"));
   }
 
+  if (!SaveGruConfigFromUi()) {
+    QMessageBox::warning(this, windowTitle(),
+                         tr("Failed to save MoGRU configuration to "
+                            "gru_config.ini."));
+  }
+
+#ifndef __linux__
+  if (client_->CheckVersionOrRestartServer()) {
+    client_->Reload();
+  }
+#endif
+
 #ifdef _WIN32
   if (!WinUtil::SetIMEHotKeyDisabled(IMEHotKeyDisabledCheckBox->isChecked())) {
     // Do not show any dialog here, since this operation will not fail
@@ -424,6 +492,7 @@ bool ConfigDialog::Update() {
   }
 #endif  // __APPLE__
 
+  configDialogButtonBox->button(QDialogButtonBox::Apply)->setEnabled(false);
   return true;
 }
 
@@ -703,13 +772,20 @@ void ConfigDialog::ClearUserHistory() {
     return;
   }
 
-  client_->CheckVersionOrRestartServer();
+  const std::string user_model_path =
+      config::GruConfigManager::ResolveUserModelFilePath(
+          gruUserModelPathLineEdit->text().trimmed().toStdString());
+  if (!user_model_path.empty()) {
+    FileUtil::UnlinkIfExists(user_model_path).IgnoreError();
+  }
 
-  if (!client_->ClearUserHistory() || !client_->ClearUserPrediction()) {
-    QMessageBox::critical(this, windowTitle(),
-                          tr("%1 Converter is not running. "
-                             "Settings were not saved.")
-                              .arg(GuiUtil::ProductName()));
+  if (client_->CheckVersionOrRestartServer()) {
+    if (!client_->ClearUserHistory() || !client_->ClearUserPrediction()) {
+      QMessageBox::critical(this, windowTitle(),
+                            tr("%1 Converter is not running. "
+                               "Settings were not saved.")
+                                .arg(GuiUtil::ProductName()));
+    }
   }
 }
 
@@ -790,7 +866,289 @@ void ConfigDialog::ResetToDefaults() {
     // TODO(taku): remove the dependency to config::ConfigHandler
     // nice to have GET_DEFAULT_CONFIG command
     ConvertFromProto(config::ConfigHandler::DefaultConfig());
+    LoadGruConfigToUi(GruPenaltyConfig());
+    EnableApplyButton();
   }
+}
+
+void ConfigDialog::SetupMogruUi() {
+  gruOnlineLearningModeComboBox->clear();
+  const bool is_ja = (QLocale::system().language() == QLocale::Japanese);
+  if (is_ja) {
+    gruOnlineLearningModeComboBox->addItem(
+        QString::fromUtf8("出力層のみ更新 (output_only : 高速・推奨)"),
+        QString::fromUtf8("output_only"));
+    gruOnlineLearningModeComboBox->addItem(
+        QString::fromUtf8("BPTT 全層更新 (full : 高表現力)"),
+        QString::fromUtf8("full"));
+
+    const int mogru_index = configDialogTabWidget->indexOf(mogruTab);
+    if (mogru_index >= 0) {
+      configDialogTabWidget->setTabText(mogru_index,
+                                        QString::fromUtf8("MoGRU設定"));
+    }
+    gruGeneralGroupBox->setTitle(
+        QString::fromUtf8("MoGRU ニューラル変換・ライブ変換設定"));
+    enableGruRewriterCheckBox->setText(QString::fromUtf8(
+        "GRUニューラル変換（候補リランキング・生成）を有効にする"));
+    enableLiveConversionCheckBox->setText(
+        QString::fromUtf8("ライブ変換（入力中の自動かな漢字変換）を有効にする"));
+    showGruScoreCheckBox->setText(
+        QString::fromUtf8("候補ウィンドウにGRUスコアとコスト内訳を表示する"));
+    gruScoreWeightLabel->setText(
+        QString::fromUtf8("GRUスコア重み (α / gru_score_weight):"));
+
+    gruModelPathsGroupBox->setTitle(
+        QString::fromUtf8("モデルファイル設定（空欄で規定のインストール先を使用）"));
+    gruModelPathLabel->setText(
+        QString::fromUtf8("ベースモデル (grumodel.bin):"));
+    gruChardataPathLabel->setText(
+        QString::fromUtf8("文字辞書データ (chardata.bin):"));
+    gruUserModelPathLabel->setText(
+        QString::fromUtf8("個人学習モデル (grumodel_user.bin):"));
+    browseGruModelPathButton->setText(QString::fromUtf8("参照..."));
+    browseGruChardataPathButton->setText(QString::fromUtf8("参照..."));
+    browseGruUserModelPathButton->setText(QString::fromUtf8("参照..."));
+
+    gruResegmentationGroupBox->setTitle(
+        QString::fromUtf8("ビームサーチ・文節再分割 (Resegmentation)"));
+    enableGruResegmentationCheckBox->setText(QString::fromUtf8(
+        "不自然な文節区切りを検出した際にGRUビームサーチで再分割する"));
+    gruResegmentThresholdLabel->setText(
+        QString::fromUtf8("再分割トリガー閾値 (平均NLL × α):"));
+
+    gruPenaltyGroupBox->setTitle(
+        QString::fromUtf8("文字種ペナルティ設定 (gru_config.ini)"));
+    gruKatakanaMultiplierLabel->setText(
+        QString::fromUtf8("カタカナ ペナルティ倍率 (katakana_multiplier):"));
+    gruHiraganaMultiplierLabel->setText(
+        QString::fromUtf8("ひらがな ペナルティ倍率 (hiragana_multiplier):"));
+    gruHiraganaLengthPowerLabel->setText(
+        QString::fromUtf8("ひらがな 連続長指数 (hiragana_length_power):"));
+    gruAlphabetMultiplierLabel->setText(
+        QString::fromUtf8("半角英字 ペナルティ倍率 (alphabet_multiplier):"));
+    gruEmojiPenaltyLabel->setText(
+        QString::fromUtf8("絵文字・記号 固定ペナルティ (emoji_penalty):"));
+
+    gruOnlineLearningGroupBox->setTitle(
+        QString::fromUtf8("オンライン個人学習 (Online Learning)"));
+    enableGruOnlineLearningCheckBox->setText(
+        QString::fromUtf8("変換確定時にオンライン個人学習を行う"));
+    gruOnlineLearningModeLabel->setText(
+        QString::fromUtf8("オンライン学習モード (online_learning_mode):"));
+    gruOnlineLearningRateLabel->setText(
+        QString::fromUtf8("学習率 (online_learning_rate):"));
+    gruOnlineLearningWeightDecayLabel->setText(QString::fromUtf8(
+        "重み減衰・忘却率 (online_learning_weight_decay):"));
+    gruOnlineLearningSaveIntervalLabel->setText(
+        QString::fromUtf8("学習モデル保存間隔（確定回数）:"));
+    resetGruUserModelButton->setText(QString::fromUtf8(
+        "個人学習したGRUモデルをリセット (grumodel_user.bin を削除)"));
+
+    gruConfigFileGroupBox->setTitle(
+        QString::fromUtf8("設定ファイル同期 (gru_config.ini)"));
+    reloadGruConfigButton->setText(
+        QString::fromUtf8("gru_config.ini から再読み込み"));
+  } else {
+    gruOnlineLearningModeComboBox->addItem(
+        QString::fromUtf8("Output layer only (output_only - fast, recommended)"),
+        QString::fromUtf8("output_only"));
+    gruOnlineLearningModeComboBox->addItem(
+        QString::fromUtf8("Full BPTT (full - higher expressiveness)"),
+        QString::fromUtf8("full"));
+  }
+
+  gruModelPathLineEdit->setPlaceholderText(QString::fromUtf8(
+      config::GruConfigManager::GetDefaultDataFilePath("grumodel.bin").c_str()));
+  gruChardataPathLineEdit->setPlaceholderText(QString::fromUtf8(
+      config::GruConfigManager::GetDefaultDataFilePath("chardata.bin").c_str()));
+  gruUserModelPathLineEdit->setPlaceholderText(QString::fromUtf8(
+      config::GruConfigManager::ResolveUserModelFilePath("").c_str()));
+}
+
+void ConfigDialog::LoadGruConfigToUi(const GruPenaltyConfig& gru_config) {
+  enableGruRewriterCheckBox->setChecked(gru_config.enable_gru_rewriter);
+  enableLiveConversionCheckBox->setChecked(gru_config.enable_live_conversion);
+  showGruScoreCheckBox->setChecked(gru_config.show_gru_score);
+  gruScoreWeightSpinBox->setValue(gru_config.gru_score_weight);
+
+  gruModelPathLineEdit->setText(
+      QString::fromUtf8(gru_config.gru_model_path.c_str()));
+  gruChardataPathLineEdit->setText(
+      QString::fromUtf8(gru_config.gru_chardata_path.c_str()));
+  gruUserModelPathLineEdit->setText(
+      QString::fromUtf8(gru_config.gru_user_model_path.c_str()));
+
+  enableGruResegmentationCheckBox->setChecked(gru_config.enable_resegmentation);
+  gruResegmentThresholdSpinBox->setValue(gru_config.resegment_threshold);
+
+  gruKatakanaMultiplierSpinBox->setValue(gru_config.katakana_multiplier);
+  gruHiraganaMultiplierSpinBox->setValue(gru_config.hiragana_multiplier);
+  gruHiraganaLengthPowerSpinBox->setValue(gru_config.hiragana_length_power);
+  gruAlphabetMultiplierSpinBox->setValue(gru_config.alphabet_multiplier);
+  gruEmojiPenaltySpinBox->setValue(gru_config.emoji_penalty);
+
+  enableGruOnlineLearningCheckBox->setChecked(
+      gru_config.enable_online_learning);
+  const int mode_index =
+      (gru_config.online_learning_mode == "full" ||
+       gru_config.online_learning_mode == "bptt" ||
+       gru_config.online_learning_mode == "full_bptt")
+          ? 1
+          : 0;
+  gruOnlineLearningModeComboBox->setCurrentIndex(mode_index);
+  gruOnlineLearningRateSpinBox->setValue(gru_config.online_learning_rate);
+  gruOnlineLearningWeightDecaySpinBox->setValue(
+      gru_config.online_learning_weight_decay);
+  gruOnlineLearningSaveIntervalSpinBox->setValue(
+      std::max<int>(1, gru_config.online_learning_save_interval));
+}
+
+GruPenaltyConfig ConfigDialog::CollectGruConfigFromUi() const {
+  GruPenaltyConfig cfg;
+  cfg.enable_gru_rewriter = enableGruRewriterCheckBox->isChecked();
+  cfg.enable_live_conversion = enableLiveConversionCheckBox->isChecked();
+  cfg.show_gru_score = showGruScoreCheckBox->isChecked();
+  cfg.gru_score_weight = gruScoreWeightSpinBox->value();
+
+  cfg.gru_model_path =
+      gruModelPathLineEdit->text().trimmed().toStdString();
+  cfg.gru_chardata_path =
+      gruChardataPathLineEdit->text().trimmed().toStdString();
+  cfg.gru_user_model_path =
+      gruUserModelPathLineEdit->text().trimmed().toStdString();
+
+  cfg.enable_resegmentation = enableGruResegmentationCheckBox->isChecked();
+  cfg.resegment_threshold = gruResegmentThresholdSpinBox->value();
+
+  cfg.katakana_multiplier = gruKatakanaMultiplierSpinBox->value();
+  cfg.hiragana_multiplier = gruHiraganaMultiplierSpinBox->value();
+  cfg.hiragana_length_power = gruHiraganaLengthPowerSpinBox->value();
+  cfg.alphabet_multiplier = gruAlphabetMultiplierSpinBox->value();
+  cfg.emoji_penalty = gruEmojiPenaltySpinBox->value();
+
+  cfg.enable_online_learning = enableGruOnlineLearningCheckBox->isChecked();
+  cfg.online_learning_mode =
+      (gruOnlineLearningModeComboBox->currentIndex() == 1) ? "full"
+                                                           : "output_only";
+  cfg.online_learning_rate = gruOnlineLearningRateSpinBox->value();
+  cfg.online_learning_weight_decay =
+      gruOnlineLearningWeightDecaySpinBox->value();
+  cfg.online_learning_save_interval =
+      gruOnlineLearningSaveIntervalSpinBox->value();
+  return cfg;
+}
+
+bool ConfigDialog::SaveGruConfigFromUi() {
+  const GruPenaltyConfig cfg = CollectGruConfigFromUi();
+  const bool ok = config::GruConfigManager::SaveConfig(cfg, "");
+  const std::string saved_path =
+      config::GruConfigManager::ResolveConfigFilePath("",
+                                                      /*allow_in_test=*/true);
+  if (!saved_path.empty()) {
+    gru_config_path_ = saved_path;
+    gru_config_mtime_ = config::GruConfigManager::GetFileMtime(saved_path);
+    gruConfigFilePathLabel->setText(QString::fromUtf8(saved_path.c_str()));
+  }
+  return ok;
+}
+
+void ConfigDialog::ReloadGruConfigFromDisk() {
+  const std::string path =
+      config::GruConfigManager::ResolveConfigFilePath("",
+                                                      /*allow_in_test=*/true);
+  const GruPenaltyConfig cfg = config::GruConfigManager::LoadConfig(path);
+  gru_config_path_ = path;
+  gru_config_mtime_ = config::GruConfigManager::GetFileMtime(path);
+  if (!path.empty()) {
+    gruConfigFilePathLabel->setText(QString::fromUtf8(path.c_str()));
+  }
+  LoadGruConfigToUi(cfg);
+}
+
+void ConfigDialog::CheckGruConfigFileModified() {
+  if (gru_config_path_.empty()) {
+    return;
+  }
+  const int64_t current_mtime =
+      config::GruConfigManager::GetFileMtime(gru_config_path_);
+  if (current_mtime > 0 && current_mtime != gru_config_mtime_) {
+    const bool apply_was_enabled =
+        configDialogButtonBox->button(QDialogButtonBox::Apply)->isEnabled();
+    ReloadGruConfigFromDisk();
+    configDialogButtonBox->button(QDialogButtonBox::Apply)
+        ->setEnabled(apply_was_enabled);
+  }
+}
+
+void ConfigDialog::BrowseGruModelPath() {
+  const QString initial =
+      gruModelPathLineEdit->text().isEmpty()
+          ? gruModelPathLineEdit->placeholderText()
+          : gruModelPathLineEdit->text();
+  const QString selected = QFileDialog::getOpenFileName(
+      this, tr("Select GRU Model File (grumodel.bin)"), initial,
+      tr("Binary Models (*.bin);;All Files (*)"));
+  if (!selected.isEmpty()) {
+    gruModelPathLineEdit->setText(selected);
+    EnableApplyButton();
+  }
+}
+
+void ConfigDialog::BrowseGruChardataPath() {
+  const QString initial =
+      gruChardataPathLineEdit->text().isEmpty()
+          ? gruChardataPathLineEdit->placeholderText()
+          : gruChardataPathLineEdit->text();
+  const QString selected = QFileDialog::getOpenFileName(
+      this, tr("Select Char Data File (chardata.bin)"), initial,
+      tr("Binary Data (*.bin);;All Files (*)"));
+  if (!selected.isEmpty()) {
+    gruChardataPathLineEdit->setText(selected);
+    EnableApplyButton();
+  }
+}
+
+void ConfigDialog::BrowseGruUserModelPath() {
+  const QString initial =
+      gruUserModelPathLineEdit->text().isEmpty()
+          ? gruUserModelPathLineEdit->placeholderText()
+          : gruUserModelPathLineEdit->text();
+  const QString selected = QFileDialog::getSaveFileName(
+      this, tr("Select User Model File (grumodel_user.bin)"), initial,
+      tr("Binary Models (*.bin);;All Files (*)"), nullptr,
+      QFileDialog::DontConfirmOverwrite);
+  if (!selected.isEmpty()) {
+    gruUserModelPathLineEdit->setText(selected);
+    EnableApplyButton();
+  }
+}
+
+void ConfigDialog::ResetGruUserModel() {
+  const bool is_ja = (QLocale::system().language() == QLocale::Japanese);
+  const QString prompt =
+      is_ja ? QString::fromUtf8(
+                  "オンライン学習で保存された個人用GRUモデル "
+                  "(grumodel_user.bin) を削除し、初期モデルへ戻しますか？")
+            : tr("Do you want to delete the personalized GRU user model "
+                 "(grumodel_user.bin) and revert to the base model?");
+  if (QMessageBox::Ok !=
+      QMessageBox::question(this, windowTitle(), prompt,
+                            QMessageBox::Ok | QMessageBox::Cancel,
+                            QMessageBox::Cancel)) {
+    return;
+  }
+
+  const std::string path =
+      config::GruConfigManager::ResolveUserModelFilePath(
+          gruUserModelPathLineEdit->text().trimmed().toStdString());
+  if (!path.empty()) {
+    FileUtil::UnlinkIfExists(path).IgnoreError();
+  }
+  const QString done_msg =
+      is_ja ? QString::fromUtf8("個人学習モデルをリセットしました。")
+            : tr("Personalized GRU user model has been reset.");
+  QMessageBox::information(this, windowTitle(), done_msg);
 }
 
 void ConfigDialog::LaunchAdministrationDialog() {

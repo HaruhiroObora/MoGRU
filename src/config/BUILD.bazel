@@ -135,3 +135,20 @@ mozc_cc_test(
         "//testing:mozctest",
     ],
 )
+
+mozc_cc_library(
+    name = "gru_config",
+    srcs = ["gru_config.cc"],
+    hdrs = ["gru_config.h"],
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "//base:file_util",
+        "//base:system_util",
+        "@com_google_absl//absl/base:no_destructor",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/time",
+    ],
+)

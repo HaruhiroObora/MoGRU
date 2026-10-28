@@ -88,10 +88,16 @@ cd MoGRU
 ```bash
 git clone https://github.com/HaruhiroObora/MoGRU.git
 cd MoGRU
-./scripts/install_macos.sh
+./install.sh
+# または: ./scripts/install_macos.sh
 ```
 > [!TIP]
-> GitHub Actions の各実行画面（Artifacts）からビルド済みのパッケージをダウンロードして直接実行・インストールすることも可能です。
+> **CIビルド生成物（Artifacts）を利用する場合（Xcode・CMake・Qt・Bazelビルド不要）**:
+> GitHub Actions の `CI for macOS` の実行画面（Artifacts）からパッケージ（`Mozc_arm64.pkg` 等、展開後の `.pkg` または `.zip` のままでも可）をダウンロードし、引数に指定して実行できます（GRUモデル重みと設定ファイルも自動配置されます）：
+> ```bash
+> ./install.sh /path/to/Mozc.pkg
+> # または: ./scripts/install_macos.sh /path/to/Mozc_arm64.pkg.zip
+> ```
 
 
 ### 🪟 Windows (PowerShell)
@@ -101,6 +107,13 @@ cd MoGRU
 Set-ExecutionPolicy Bypass -Scope Process -Force
 .\scripts\install_windows.ps1
 ```
+> [!TIP]
+> **CIビルド生成物（Artifacts）を利用する場合（Visual Studio・Bazelビルド不要）**:
+> GitHub Actions の `CI for Windows` の実行画面（Artifacts）からインストーラ（`Mozc64_x64.msi` 等、展開後の `.msi` または `.zip` のままでも可）をダウンロードし、引数に指定して実行できます（GRUモデル重みと設定ファイルも自動配置されます）：
+> ```powershell
+> .\scripts\install_windows.ps1 C:\path\to\Mozc64.msi
+> # Git Bash からは ./install.sh /c/path/to/Mozc64.msi でも実行可能
+> ```
 
 ---
 

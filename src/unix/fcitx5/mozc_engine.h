@@ -72,8 +72,19 @@ FCITX_CONFIG_ENUM_NAME_WITH_I18N(CompositionMode, N_("Direct"), N_("Hiragana"),
                                  N_("Full ASCII"), N_("Half Katakana"));
 
 FCITX_CONFIGURATION(
-    MozcEngineConfig, const std::string toolPath_ = mozc::FileUtil::JoinPath(
-                          mozc::SystemUtil::GetServerDirectory(), "mozc_tool");
+    MozcEngineConfig,
+    static std::string ResolveToolPath() {
+      if (const char* home = std::getenv("HOME")) {
+        const std::string local_tool =
+            mozc::FileUtil::JoinPath(home, ".local/lib/mozc/mozc_tool");
+        if (mozc::FileUtil::FileExists(local_tool).ok()) {
+          return local_tool;
+        }
+      }
+      return mozc::FileUtil::JoinPath(mozc::SystemUtil::GetServerDirectory(),
+                                      "mozc_tool");
+    }
+    const std::string toolPath_ = ResolveToolPath();
     std::string toolCommand(const char* arg) {
       return stringutils::concat(toolPath_, " ", arg);
     }
@@ -96,38 +107,6 @@ FCITX_CONFIGURATION(
         false};
     Option<Key> expand{this, "ExpandKey", _("Hotkey to expand usage"),
                        Key("Control+Alt+H")};
-
-    static std::string GetPreferredModelPath(const std::string& filename) {
-      const char* home = std::getenv("HOME");
-      if (home != nullptr) {
-        return mozc::FileUtil::JoinPath(
-            home, mozc::FileUtil::JoinPath(".config/mozc", filename));
-      }
-      return mozc::FileUtil::JoinPath(
-          mozc::SystemUtil::GetUserProfileDirectory(), filename);
-    }
-
-    const std::string defaultGruModelPath_ = GetPreferredModelPath("grumodel.bin");
-    const std::string defaultGruChardataPath_ = GetPreferredModelPath("chardata.bin");
-
-    Option<std::string> gruModelPath{
-        this, "GruModelPath", _("GRU Model Path (grumodel.bin)"),
-        defaultGruModelPath_};
-    Option<std::string> gruChardataPath{
-        this, "GruChardataPath", _("CharIndex Data Path (chardata.bin)"),
-        defaultGruChardataPath_};
-    Option<int, IntConstrain> gruScoreWeight{
-        this, "GruScoreWeight", _("GRU Score Weight (Alpha)"), 800,
-        IntConstrain(0, 100000)};
-    Option<bool> showGruScore{
-        this, "ShowGruScore", _("Show GRU Score in candidate description"), true};
-    Option<bool> enableGruResegmentation{
-        this, "EnableGruResegmentation", _("Enable GRU-based Segment Boundary Resegmentation"), true};
-    Option<int, IntConstrain> gruResegmentCostThreshold{
-        this, "GruResegmentCostThreshold", _("GRU Resegmentation Cost Improvement Threshold"), 600,
-        IntConstrain(0, 100000)};
-    Option<bool> enableLiveConversion{
-        this, "EnableLiveConversion", _("Enable Live Conversion"), true};
 
     ExternalOption configTool{this, "ConfigTool", _("Configuration Tool"),
                               toolCommand("--mode=config_dialog")};
@@ -167,7 +146,7 @@ class MozcEngine final : public InputMethodEngineV2 {
   std::string subModeIconImpl(const InputMethodEntry& entry,
                               InputContext& ic) override;
 
-  const Configuration* getConfig() const override { return &config_; }
+  const Configuration* getConfig() const override;
   void setConfig(const RawConfig& config) override;
 
   auto& config() const { return config_; }
@@ -203,7 +182,7 @@ class MozcEngine final : public InputMethodEngineV2 {
       aboutAction_;
   SimpleAction separatorAction_;
   Menu toolMenu_;
-  MozcEngineConfig config_;
+  mutable MozcEngineConfig config_;
   std::string addonName_;
   bool deactivating_ = false;
 

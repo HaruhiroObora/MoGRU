@@ -34,11 +34,13 @@
 
 #include <QObject>
 #include <QTimer>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
 
 #include "client/client_interface.h"
+#include "config/gru_config.h"
 #include "gui/config_dialog/ui_config_dialog.h"
 #include "protocol/config.pb.h"
 
@@ -73,6 +75,12 @@ class ConfigDialog : public QDialog, private Ui::ConfigDialog {
   virtual void SelectSuggestionSetting(int state);
   virtual void LaunchAdministrationDialog();
   virtual void EnableApplyButton();
+  virtual void BrowseGruModelPath();
+  virtual void BrowseGruChardataPath();
+  virtual void BrowseGruUserModelPath();
+  virtual void ResetGruUserModel();
+  virtual void ReloadGruConfigFromDisk();
+  virtual void CheckGruConfigFileModified();
 
  protected:
   bool eventFilter(QObject* obj, QEvent* event) override;
@@ -86,6 +94,10 @@ class ConfigDialog : public QDialog, private Ui::ConfigDialog {
   void GetSendStatsCheckBox() const;
   void ConvertToProto(config::Config* config) const;
   void ConvertFromProto(const config::Config& config);
+  void SetupMogruUi();
+  void LoadGruConfigToUi(const GruPenaltyConfig& gru_config);
+  bool SaveGruConfigFromUi();
+  GruPenaltyConfig CollectGruConfigFromUi() const;
   bool Update();
   void Reload();
 
@@ -100,6 +112,9 @@ class ConfigDialog : public QDialog, private Ui::ConfigDialog {
   bool initial_use_mode_indicator_;
   std::map<QString, config::Config::SessionKeymap>
       keymapname_sessionkeymap_map_;
+  std::string gru_config_path_;
+  int64_t gru_config_mtime_ = 0;
+  QTimer* gru_config_watch_timer_ = nullptr;
 };
 
 }  // namespace gui

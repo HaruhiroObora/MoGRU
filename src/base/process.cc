@@ -238,6 +238,15 @@ bool Process::SpawnProcess(absl::string_view path, absl::string_view arg,
 
 bool Process::SpawnMozcProcess(absl::string_view filename,
                                absl::string_view arg, size_t* pid) {
+#ifdef __linux__
+  if (const char* home = std::getenv("HOME")) {
+    const std::string local_path = FileUtil::JoinPath(
+        home, FileUtil::JoinPath(".local/lib/mozc", filename));
+    if (FileUtil::FileExists(local_path).ok()) {
+      return Process::SpawnProcess(local_path, arg, pid);
+    }
+  }
+#endif  // __linux__
   return Process::SpawnProcess(
       FileUtil::JoinPath(SystemUtil::GetServerDirectory(), filename), arg, pid);
 }

@@ -172,444 +172,6 @@ float ScoreCandidateWithContext(const gruscorer::GruModel& model,
   return score;
 }
 
-std::string ResolveFilePath(const std::string& user_specified,
-                            const std::string& default_filename) {
-  if (!user_specified.empty()) {
-    if (std::filesystem::exists(user_specified)) {
-      return user_specified;
-    }
-    if (user_specified[0] == '~') {
-      const char* home = std::getenv("HOME");
-      if (home != nullptr) {
-        std::string expanded = std::string(home) + user_specified.substr(1);
-        if (std::filesystem::exists(expanded)) return expanded;
-      }
-    }
-    const char* test_srcdir = std::getenv("TEST_SRCDIR");
-    if (test_srcdir != nullptr) {
-      std::string p = FileUtil::JoinPath(test_srcdir, user_specified);
-      if (std::filesystem::exists(p)) return p;
-      p = FileUtil::JoinPath(test_srcdir, FileUtil::JoinPath("_main", user_specified));
-      if (std::filesystem::exists(p)) return p;
-    }
-    return "";
-  }
-
-  // 1. ~/.config/mozc/<filename> and ~/.mozc/<filename>
-  const char* home = std::getenv("HOME");
-  if (home != nullptr) {
-    std::string config_path = FileUtil::JoinPath(
-        home, FileUtil::JoinPath(".config/mozc", default_filename));
-    if (std::filesystem::exists(config_path)) return config_path;
-
-    std::string dot_mozc = FileUtil::JoinPath(
-        home, FileUtil::JoinPath(".mozc", default_filename));
-    if (std::filesystem::exists(dot_mozc)) return dot_mozc;
-  }
-
-  const std::string user_profile = SystemUtil::GetUserProfileDirectory();
-  if (!user_profile.empty()) {
-    std::string path = FileUtil::JoinPath(user_profile, default_filename);
-    if (std::filesystem::exists(path)) return path;
-  }
-
-  // 2. Known local development paths & runfiles
-  std::vector<std::string> filenames = {default_filename};
-  if (default_filename == "grumodel.bin") {
-    filenames.push_back("dummy_model.bin");
-  }
-
-  for (const auto& fname : filenames) {
-    const std::vector<std::string> dev_paths = {
-        FileUtil::JoinPath("models", fname),
-        FileUtil::JoinPath("../models", fname),
-        FileUtil::JoinPath("gru_scorer", fname),
-        FileUtil::JoinPath("../gru_scorer", fname),
-        fname,
-    };
-    for (const auto& p : dev_paths) {
-      if (std::filesystem::exists(p)) return p;
-    }
-
-    // 3. Bazel runfiles (TEST_SRCDIR)
-    const char* test_srcdir = std::getenv("TEST_SRCDIR");
-    if (test_srcdir != nullptr) {
-      std::string p = FileUtil::JoinPath(
-          test_srcdir, FileUtil::JoinPath("_main/gru_scorer", fname));
-      if (std::filesystem::exists(p)) return p;
-      p = FileUtil::JoinPath(
-          test_srcdir, FileUtil::JoinPath("gru_scorer", fname));
-      if (std::filesystem::exists(p)) return p;
-    }
-  }
-
-  return "";
-}
-
-std::string ResolveConfigFilePath(const std::string& user_specified) {
-  if (!user_specified.empty()) {
-    return ResolveFilePath(user_specified, "gru_config.ini");
-  }
-  const char* home = std::getenv("HOME");
-  if (home != nullptr) {
-    std::string config_path = FileUtil::JoinPath(
-        home, FileUtil::JoinPath(".config/mozc", "gru_config.ini"));
-    if (std::filesystem::exists(config_path)) return config_path;
-
-    std::string dot_mozc = FileUtil::JoinPath(
-        home, FileUtil::JoinPath(".mozc", "gru_config.ini"));
-    if (std::filesystem::exists(dot_mozc)) return dot_mozc;
-
-    return config_path;  // target for creation
-  }
-  const std::string user_profile = SystemUtil::GetUserProfileDirectory();
-  if (!user_profile.empty()) {
-    std::string path = FileUtil::JoinPath(user_profile, "gru_config.ini");
-    return path;
-  }
-  return "";
-}
-
-std::string ResolveUserModelFilePath(const std::string& user_specified) {
-  if (!user_specified.empty()) {
-    if (user_specified[0] == '~') {
-      const char* home = std::getenv("HOME");
-      if (home != nullptr) {
-        return std::string(home) + user_specified.substr(1);
-      }
-    }
-    return user_specified;
-  }
-  if (const char* test_tmpdir = std::getenv("TEST_TMPDIR")) {
-    if (test_tmpdir[0] != '\0') {
-      return FileUtil::JoinPath(test_tmpdir, "grumodel_user.bin");
-    }
-  }
-  const char* home = std::getenv("HOME");
-  if (home != nullptr) {
-    std::string config_path = FileUtil::JoinPath(
-        home, FileUtil::JoinPath(".config/mozc", "grumodel_user.bin"));
-    if (std::filesystem::exists(config_path)) return config_path;
-
-    std::string dot_mozc = FileUtil::JoinPath(
-        home, FileUtil::JoinPath(".mozc", "grumodel_user.bin"));
-    if (std::filesystem::exists(dot_mozc)) return dot_mozc;
-
-    return config_path;  // target for creation
-  }
-  const std::string user_profile = SystemUtil::GetUserProfileDirectory();
-  if (!user_profile.empty()) {
-    return FileUtil::JoinPath(user_profile, "grumodel_user.bin");
-  }
-  return "";
-}
-
-constexpr absl::string_view kDefaultConfigTemplate =
-    "# ==============================================================================\n"
-    "# Mozc GRU 言語モデル リライター 設定ファイル\n"
-    "# ==============================================================================\n"
-    "# このファイルの設定値を変更・保存すると、Fcitx5 や Mozc の再起動なしで\n"
-    "# 次の日本語変換から自動的に反映されます（ホットリロード対応）。\n"
-    "# ==============================================================================\n"
-    "\n"
-    "# 【カタカナのみの候補に対するスコア乗数】 (初期値: 1.3)\n"
-    "# - GRU の対数尤度スコア（負値）に乗算されます。\n"
-    "# - 1.0 = 補正なし（素の言語モデルスコア）\n"
-    "# - 1.0 より大きい値（例: 1.3, 1.5）: コストが増加し、カタカナ候補が抑制されます。\n"
-    "#   確信度が高いカタカナ語（例:「ラーメン」）は抑制が小さく、不自然なカタカナ候補は強く抑制されます。\n"
-    "# - 1.0 より小さい値（例: 0.8）: コストが減少し、カタカナ候補が優先（ブースト）されます。\n"
-    "katakana_multiplier = 1.3\n"
-    "\n"
-    "# 【平仮名のみの候補に対するスコア乗数】 (初期値: 1.1)\n"
-    "# - 漢字変換できる語で、ひらがなのまま確定するのを防ぎたい場合に有効です。\n"
-    "# - 1.0 = 補正なし\n"
-    "# - 1.0 より大きい値（例: 1.1, 1.3）: 平仮名候補が抑制されます。\n"
-    "# - 1文字の助詞（「は」「が」「を」等）は自動的にペナルティ0倍（補正なし）となります。\n"
-    "# - 2文字以上の語には、文字数に応じたスケーリングが適用されます。\n"
-    "hiragana_multiplier = 1.1\n"
-    "\n"
-    "# 【平仮名ペナルティの文字数スケーリング指数】 (初期値: 1.0)\n"
-    "# - 文字数 L に応じて倍率をスケーリングする指数 p です。\n"
-    "# - 式: effective_multiplier = 1.0 + (hiragana_multiplier - 1.0) * (L - 1)^p\n"
-    "# - 1.0: 文字数に比例して線形に増加（2文字: 1.10, 3文字: 1.20, 4文字: 1.30, 6文字: 1.50）\n"
-    "# - 1.5 や 2.0: 長い平仮名ほど加速度的にペナルティを強化（4文字以上をより確実に漢字化）\n"
-    "# - 0.0: 文字数によらず一律 hiragana_multiplier を適用\n"
-    "hiragana_length_power = 1.0\n"
-    "\n"
-    "# 【絵文字候補に対するペナルティ】 (初期値: 15000.0)\n"
-    "# - 文脈予測で絵文字が上位に割り込んでくるのを防ぐための固定加算コストです。\n"
-    "emoji_penalty = 15000.0\n"
-    "\n"
-    "# 【英単語候補に対するスコア乗数】 (初期値: 2.0)\n"
-    "# - 「とうきょう」に「TOKYO」や「Tokyo」が誤って第1候補に昇格するのを防ぎます。\n"
-    "# - 負の対数尤度スコアを乗算（2.0 = コスト実質2倍加算）します。\n"
-    "alphabet_multiplier = 2.0\n"
-    "\n"
-    "# 【文節区切り再編成（Resegmentation）の有効化】 (初期値: true)\n"
-    "# - GRU 言語モデルの文全体スコアを用いて、より自然な文節区切り位置へ自動変更します。\n"
-    "# - true: 有効, false: 無効（従来の Viterbi による固定区切りを使用）\n"
-    "enable_resegmentation = true\n"
-    "\n"
-    "# 【文節区切りを変更するための最小コスト改善閾値】 (初期値: 600.0)\n"
-    "# - 別の文節区切りパターンのスコアが、デフォルトの区切りよりこの値以上改善した場合のみ区切りを変更します。\n"
-    "# - 値を小さくする（例: 300）と積極的に区切りを変更し、大きくする（例: 1000）と慎重になります。\n"
-    "resegment_threshold = 600.0\n"
-    "\n"
-    "# 【入力履歴を用いたオンライン継続学習の有効化】 (初期値: true)\n"
-    "# - 変換確定時の文字列・文脈を用いて、GRU 言語モデルをリアルタイムに微調整します。\n"
-    "enable_online_learning = true\n"
-    "\n"
-    "# 【オンライン学習の更新対象モード】 (初期値: output_only)\n"
-    "# - output_only: 出力層（w_out / b_out）のみを更新（高速・忘却が起きにくく安定）\n"
-    "# - full: Embedding・GRUセル・出力層の全パラメータをBPTTで更新（高い文脈適応力）\n"
-    "online_learning_mode = output_only\n"
-    "\n"
-    "# 【オンライン学習の学習率】 (初期値: 0.005)\n"
-    "# - output_only モードでは 0.002〜0.01、full モードでは 0.0005〜0.002 程度を推奨します。\n"
-    "online_learning_rate = 0.005\n"
-    "\n"
-    "# 【ベースモデルへのL2アンカー正則化係数】 (初期値: 0.001)\n"
-    "# - 元の言語モデル（grumodel.bin）から重みが過度に乖離して一般的な日本語を忘却するのを防ぎます。\n"
-    "online_learning_weight_decay = 0.001\n"
-    "\n"
-    "# 【学習済みユーザーモデルの自動保存間隔（確定回数）】 (初期値: 5)\n"
-    "# - 指定した確定回数ごと、およびフォーカス移動時（Sync）に ~/.config/mozc/grumodel_user.bin へ保存します。\n"
-    "online_learning_save_interval = 5\n";
-
-void EnsureConfigFileExists(const std::string& path) {
-  if (path.empty()) return;
-
-  if (!std::filesystem::exists(path)) {
-    std::ofstream ofs(path);
-    if (!ofs.is_open()) return;
-    ofs << kDefaultConfigTemplate;
-    return;
-  }
-
-  // Check if existing file needs upgrade (e.g. contains legacy keys or lacks new keys)
-  std::ifstream ifs(path);
-  if (!ifs.is_open()) return;
-  std::string content((std::istreambuf_iterator<char>(ifs)),
-                      std::istreambuf_iterator<char>());
-  ifs.close();
-
-  const bool has_legacy_keys =
-      (content.find("katakana_penalty") != std::string::npos ||
-       content.find("hiragana_penalty") != std::string::npos);
-
-  if (has_legacy_keys) {
-    std::error_code ec;
-    std::filesystem::copy_file(
-        path, path + ".bak",
-        std::filesystem::copy_options::overwrite_existing, ec);
-
-    std::ofstream ofs(path, std::ios::trunc);
-    if (ofs.is_open()) {
-      ofs << kDefaultConfigTemplate;
-      LOG(INFO) << "GruRewriter: Upgraded legacy config file to new format: " << path;
-    }
-    return;
-  }
-
-  // If already in new format, ensure newly introduced options are appended if missing,
-  // without overwriting existing customized values.
-  std::string append_content;
-  if (content.find("hiragana_length_power") == std::string::npos) {
-    append_content +=
-        "\n# 【平仮名ペナルティの文字数スケーリング指数】 (初期値: 1.0)\n"
-        "# - 1文字の平仮名（助詞「は」「が」等）はペナルティ対象外（等倍 1.0）です。\n"
-        "# - 2文字以上の平仮名に対し、超過文字数 (L - 1) のべき乗でペナルティをスケールします。\n"
-        "hiragana_length_power = 1.0\n";
-  }
-  if (content.find("alphabet_multiplier") == std::string::npos) {
-    append_content +=
-        "\n# 【アルファベットのみの候補に対するスコア乗数】 (初期値: 2.0)\n"
-        "alphabet_multiplier = 2.0\n";
-  }
-  if (content.find("enable_resegmentation") == std::string::npos) {
-    append_content +=
-        "\n# 【文節区切り再編成（Resegmentation）の有効化】 (初期値: true)\n"
-        "enable_resegmentation = true\n";
-  }
-  if (content.find("resegment_threshold") == std::string::npos) {
-    append_content +=
-        "\n# 【文節区切りを変更するための最小コスト改善閾値】 (初期値: 600.0)\n"
-        "resegment_threshold = 600.0\n";
-  }
-  if (content.find("enable_online_learning") == std::string::npos) {
-    append_content +=
-        "\n# 【入力履歴を用いたオンライン継続学習の有効化】 (初期値: true)\n"
-        "enable_online_learning = true\n";
-  }
-  if (content.find("online_learning_mode") == std::string::npos) {
-    append_content +=
-        "\n# 【オンライン学習の更新対象モード】 (初期値: output_only)\n"
-        "# - output_only: 出力層のみ更新 / full: 全パラメータをBPTTで更新\n"
-        "online_learning_mode = output_only\n";
-  }
-  if (content.find("online_learning_rate") == std::string::npos) {
-    append_content +=
-        "\n# 【オンライン学習の学習率】 (初期値: 0.005)\n"
-        "online_learning_rate = 0.005\n";
-  }
-  if (content.find("online_learning_weight_decay") == std::string::npos) {
-    append_content +=
-        "\n# 【ベースモデルへのL2アンカー正則化係数】 (初期値: 0.001)\n"
-        "online_learning_weight_decay = 0.001\n";
-  }
-  if (content.find("online_learning_save_interval") == std::string::npos) {
-    append_content +=
-        "\n# 【学習済みユーザーモデルの自動保存間隔（確定回数）】 (初期値: 5)\n"
-        "online_learning_save_interval = 5\n";
-  }
-
-  if (!append_content.empty()) {
-    std::ofstream ofs(path, std::ios::app);
-    if (ofs.is_open()) {
-      ofs << append_content;
-      LOG(INFO) << "GruRewriter: Appended missing config options to: " << path;
-    }
-  }
-}
-
-GruPenaltyConfig ParseConfigFile(const std::string& path, const GruPenaltyConfig& base_config) {
-  GruPenaltyConfig config = base_config;
-  std::ifstream ifs(path);
-  if (!ifs.is_open()) return config;
-
-  bool has_katakana_mult = false;
-  bool has_hiragana_mult = false;
-  double legacy_katakana_penalty = 0.0;
-  bool has_legacy_katakana_penalty = false;
-  double legacy_hiragana_penalty = 0.0;
-  bool has_legacy_hiragana_penalty = false;
-
-  std::string line;
-  while (std::getline(ifs, line)) {
-    absl::string_view sv = line;
-    const size_t comment_pos = sv.find_first_of("#;");
-    if (comment_pos != absl::string_view::npos) {
-      sv = sv.substr(0, comment_pos);
-    }
-    sv = absl::StripAsciiWhitespace(sv);
-    if (sv.empty()) continue;
-
-    const size_t eq_pos = sv.find('=');
-    if (eq_pos == absl::string_view::npos) continue;
-
-    absl::string_view key = absl::StripAsciiWhitespace(sv.substr(0, eq_pos));
-    absl::string_view val = absl::StripAsciiWhitespace(sv.substr(eq_pos + 1));
-
-    if (key == "online_learning_mode") {
-      if (val == "full" || val == "full_bptt" || val == "output_only") {
-        config.online_learning_mode = std::string(val);
-      }
-      continue;
-    }
-    if (key == "enable_resegmentation") {
-      bool b = true;
-      if (absl::SimpleAtob(val, &b)) {
-        config.enable_resegmentation = b;
-      }
-      continue;
-    }
-    if (key == "enable_online_learning") {
-      bool b = true;
-      if (absl::SimpleAtob(val, &b)) {
-        config.enable_online_learning = b;
-      }
-      continue;
-    }
-    if (key == "online_learning_save_interval") {
-      int32_t interval = 5;
-      if (absl::SimpleAtoi(val, &interval) && interval >= 1) {
-        config.online_learning_save_interval = interval;
-      }
-      continue;
-    }
-
-    double d = 0.0;
-    if (absl::SimpleAtod(val, &d)) {
-      if (key == "katakana_multiplier") {
-        config.katakana_multiplier = d;
-        has_katakana_mult = true;
-      } else if (key == "hiragana_multiplier") {
-        config.hiragana_multiplier = d;
-        has_hiragana_mult = true;
-      } else if (key == "hiragana_length_power") {
-        config.hiragana_length_power = d;
-      } else if (key == "katakana_penalty") {
-        legacy_katakana_penalty = d;
-        has_legacy_katakana_penalty = true;
-      } else if (key == "hiragana_penalty") {
-        legacy_hiragana_penalty = d;
-        has_legacy_hiragana_penalty = true;
-      } else if (key == "emoji_penalty") {
-        config.emoji_penalty = d;
-      } else if (key == "alphabet_multiplier") {
-        config.alphabet_multiplier = d;
-      } else if (key == "resegment_threshold") {
-        config.resegment_threshold = d;
-      } else if (key == "online_learning_rate") {
-        config.online_learning_rate = d;
-      } else if (key == "online_learning_weight_decay") {
-        config.online_learning_weight_decay = d;
-      }
-    }
-  }
-
-  // Fallback for legacy configuration
-  if (!has_katakana_mult && has_legacy_katakana_penalty) {
-    config.katakana_multiplier = 1.0 + (legacy_katakana_penalty / 1600.0);
-  }
-  if (!has_hiragana_mult && has_legacy_hiragana_penalty) {
-    config.hiragana_multiplier = 1.0 + (legacy_hiragana_penalty / 3000.0);
-  }
-
-  return config;
-}
-
-void ApplyEnvOverrides(GruPenaltyConfig* config) {
-  if (const char* e = std::getenv("MOZC_GRU_KATAKANA_MULTIPLIER")) {
-    double d = 0.0;
-    if (absl::SimpleAtod(e, &d)) config->katakana_multiplier = d;
-  }
-  if (const char* e = std::getenv("MOZC_GRU_HIRAGANA_MULTIPLIER")) {
-    double d = 0.0;
-    if (absl::SimpleAtod(e, &d)) config->hiragana_multiplier = d;
-  }
-  if (const char* e = std::getenv("MOZC_GRU_HIRAGANA_LENGTH_POWER")) {
-    double d = 0.0;
-    if (absl::SimpleAtod(e, &d)) config->hiragana_length_power = d;
-  }
-  if (const char* e = std::getenv("MOZC_GRU_ALPHABET_MULTIPLIER")) {
-    double d = 0.0;
-    if (absl::SimpleAtod(e, &d)) config->alphabet_multiplier = d;
-  }
-  if (const char* e = std::getenv("MOZC_GRU_ENABLE_RESEGMENTATION")) {
-    bool b = true;
-    if (absl::SimpleAtob(e, &b)) config->enable_resegmentation = b;
-  }
-  if (const char* e = std::getenv("MOZC_GRU_RESEGMENT_THRESHOLD")) {
-    double d = 0.0;
-    if (absl::SimpleAtod(e, &d)) config->resegment_threshold = d;
-  }
-  if (const char* e = std::getenv("MOZC_GRU_ENABLE_ONLINE_LEARNING")) {
-    bool b = true;
-    if (absl::SimpleAtob(e, &b)) config->enable_online_learning = b;
-  }
-  if (const char* e = std::getenv("MOZC_GRU_ONLINE_LEARNING_MODE")) {
-    absl::string_view sv = absl::StripAsciiWhitespace(e);
-    if (sv == "full" || sv == "full_bptt" || sv == "output_only") {
-      config->online_learning_mode = std::string(sv);
-    }
-  }
-  if (const char* e = std::getenv("MOZC_GRU_ONLINE_LEARNING_RATE")) {
-    double d = 0.0;
-    if (absl::SimpleAtod(e, &d)) config->online_learning_rate = d;
-  }
-}
-
 std::string GetHistoryPrefix(const ConversionRequest* request,
                              const Segments& segments) {
   std::string prefix;
@@ -752,22 +314,23 @@ GruPenaltyConfig GruRewriter::GetPenaltyConfig() const {
   last_config_check_time_ = now;
 
   if (config_file_path_.empty()) {
-    config_file_path_ = ResolveConfigFilePath(absl::GetFlag(FLAGS_gru_config_path));
-    EnsureConfigFileExists(config_file_path_);
+    config_file_path_ = config::GruConfigManager::ResolveConfigFilePath(
+        absl::GetFlag(FLAGS_gru_config_path), /*allow_in_test=*/false);
+    config::GruConfigManager::EnsureConfigFileExists(config_file_path_);
   }
 
-  int64_t current_mtime = 0;
-  if (!config_file_path_.empty() && std::filesystem::exists(config_file_path_)) {
-    std::error_code ec;
-    auto ftime = std::filesystem::last_write_time(config_file_path_, ec);
-    if (!ec) {
-      current_mtime = ftime.time_since_epoch().count();
-    }
-  }
+  const int64_t current_mtime =
+      config::GruConfigManager::GetFileMtime(config_file_path_);
 
   if (current_mtime != last_config_mtime_ || last_config_mtime_ == 0) {
     last_config_mtime_ = current_mtime;
     GruPenaltyConfig base;
+    base.enable_gru_rewriter = absl::GetFlag(FLAGS_enable_gru_rewriter);
+    base.gru_model_path = absl::GetFlag(FLAGS_gru_model_path);
+    base.gru_chardata_path = absl::GetFlag(FLAGS_gru_chardata_path);
+    base.gru_user_model_path = absl::GetFlag(FLAGS_gru_user_model_path);
+    base.gru_score_weight = absl::GetFlag(FLAGS_gru_score_weight);
+    base.show_gru_score = absl::GetFlag(FLAGS_show_gru_score);
     base.katakana_multiplier = absl::GetFlag(FLAGS_gru_katakana_multiplier);
     base.hiragana_multiplier = absl::GetFlag(FLAGS_gru_hiragana_multiplier);
     base.hiragana_length_power = absl::GetFlag(FLAGS_gru_hiragana_length_power);
@@ -777,9 +340,16 @@ GruPenaltyConfig GruRewriter::GetPenaltyConfig() const {
     base.enable_online_learning = absl::GetFlag(FLAGS_enable_gru_online_learning);
 
     if (!config_file_path_.empty() && std::filesystem::exists(config_file_path_)) {
-      penalty_config_ = ParseConfigFile(config_file_path_, base);
+      penalty_config_ = config::GruConfigManager::ParseConfigFile(
+          config_file_path_, base);
       LOG(INFO) << "GruRewriter: Hot-reloaded configuration from "
-                << config_file_path_ << ": katakana_multiplier="
+                << config_file_path_ << ": enable_gru_rewriter="
+                << penalty_config_.enable_gru_rewriter
+                << ", enable_live_conversion="
+                << penalty_config_.enable_live_conversion
+                << ", gru_score_weight=" << penalty_config_.gru_score_weight
+                << ", show_gru_score=" << penalty_config_.show_gru_score
+                << ", katakana_multiplier="
                 << penalty_config_.katakana_multiplier
                 << ", hiragana_multiplier="
                 << penalty_config_.hiragana_multiplier
@@ -801,7 +371,7 @@ GruPenaltyConfig GruRewriter::GetPenaltyConfig() const {
     } else {
       penalty_config_ = base;
     }
-    ApplyEnvOverrides(&penalty_config_);
+    config::GruConfigManager::ApplyEnvOverrides(&penalty_config_);
   }
 
   return penalty_config_;
@@ -810,17 +380,40 @@ GruPenaltyConfig GruRewriter::GetPenaltyConfig() const {
 bool GruRewriter::EnsureInitialized() const {
   absl::MutexLock l(mutex_);
 
+  const std::string configured_chardata =
+      !penalty_config_.gru_chardata_path.empty()
+          ? penalty_config_.gru_chardata_path
+          : absl::GetFlag(FLAGS_gru_chardata_path);
+  const std::string configured_model =
+      !penalty_config_.gru_model_path.empty()
+          ? penalty_config_.gru_model_path
+          : absl::GetFlag(FLAGS_gru_model_path);
+  const std::string configured_user_model =
+      !penalty_config_.gru_user_model_path.empty()
+          ? penalty_config_.gru_user_model_path
+          : absl::GetFlag(FLAGS_gru_user_model_path);
+
   const std::string chardata_path =
-      ResolveFilePath(absl::GetFlag(FLAGS_gru_chardata_path), "chardata.bin");
+      config::GruConfigManager::ResolveDataFilePath(
+          configured_chardata, "chardata.bin");
   const std::string model_path =
-      ResolveFilePath(absl::GetFlag(FLAGS_gru_model_path), "grumodel.bin");
+      config::GruConfigManager::ResolveDataFilePath(
+          configured_model, "grumodel.bin");
   const std::string user_model_path =
-      ResolveUserModelFilePath(absl::GetFlag(FLAGS_gru_user_model_path));
+      config::GruConfigManager::ResolveUserModelFilePath(configured_user_model);
 
   if (is_initialized_ && model_ && model_->is_loaded() && indexer_ &&
       loaded_chardata_path_ == chardata_path &&
       loaded_model_path_ == model_path &&
       user_model_path_ == user_model_path) {
+    if (loaded_has_user_model_ && unsaved_updates_count_ == 0 &&
+        !user_model_path_.empty() &&
+        !std::filesystem::exists(user_model_path_)) {
+      model_->ResetToBaseWeights();
+      loaded_has_user_model_ = false;
+      last_revert_id_ = 0;
+      LOG(INFO) << "GruRewriter: Reset weights to base model after user model removal.";
+    }
     return true;
   }
 
@@ -830,6 +423,7 @@ bool GruRewriter::EnsureInitialized() const {
   user_model_path_ = user_model_path;
   unsaved_updates_count_ = 0;
   last_revert_id_ = 0;
+  loaded_has_user_model_ = false;
   model_.reset();
   indexer_.reset();
 
@@ -857,6 +451,7 @@ bool GruRewriter::EnsureInitialized() const {
 
   if (!user_model_path_.empty() && std::filesystem::exists(user_model_path_)) {
     if (model->LoadUserWeights(user_model_path_)) {
+      loaded_has_user_model_ = true;
       LOG(INFO) << "GruRewriter: Loaded user-adapted GRU weights from " << user_model_path_;
     } else {
       LOG(WARNING) << "GruRewriter: Ignored incompatible or corrupted user model at "
@@ -883,9 +478,11 @@ bool GruRewriter::Reload() {
     last_config_check_time_ = absl::InfinitePast();
     last_revert_id_ = 0;
     unsaved_updates_count_ = 0;
+    loaded_has_user_model_ = false;
     model_.reset();
     indexer_.reset();
   }
+  (void)GetPenaltyConfig();
   return EnsureInitialized();
 }
 
@@ -903,13 +500,14 @@ void GruRewriter::Finish(const ConversionRequest& request,
   if (request.config().history_learning_level() != config::Config::DEFAULT_HISTORY) {
     return;
   }
-  if (!EnsureInitialized()) {
-    return;
-  }
 
   const GruPenaltyConfig penalty_config = GetPenaltyConfig();
-  if (!penalty_config.enable_online_learning ||
+  if (!penalty_config.enable_gru_rewriter ||
+      !penalty_config.enable_online_learning ||
       penalty_config.online_learning_rate <= 0.0) {
+    return;
+  }
+  if (!EnsureInitialized()) {
     return;
   }
 
@@ -970,6 +568,7 @@ void GruRewriter::Finish(const ConversionRequest& request,
       !user_model_path_.empty()) {
     if (model_->SaveModel(user_model_path_)) {
       unsaved_updates_count_ = 0;
+      loaded_has_user_model_ = true;
     }
   }
 }
@@ -999,6 +598,7 @@ bool GruRewriter::Sync() {
       !user_model_path_.empty()) {
     if (model_->SaveModel(user_model_path_)) {
       unsaved_updates_count_ = 0;
+      loaded_has_user_model_ = true;
     } else {
       return false;
     }
@@ -1013,10 +613,12 @@ void GruRewriter::Clear() {
   }
   unsaved_updates_count_ = 0;
   last_revert_id_ = 0;
+  loaded_has_user_model_ = false;
 
   const std::string target_path =
       user_model_path_.empty()
-          ? ResolveUserModelFilePath(absl::GetFlag(FLAGS_gru_user_model_path))
+          ? config::GruConfigManager::ResolveUserModelFilePath(
+                absl::GetFlag(FLAGS_gru_user_model_path))
           : user_model_path_;
   if (!target_path.empty() && std::filesystem::exists(target_path)) {
     std::error_code ec;
@@ -1038,14 +640,18 @@ bool GruRewriter::Rewrite(const ConversionRequest& request,
     return false;
   }
 
+  const GruPenaltyConfig penalty_config = GetPenaltyConfig();
+  if (!penalty_config.enable_gru_rewriter) {
+    return false;
+  }
+
   if (!EnsureInitialized()) {
     return false;
   }
 
-  const GruPenaltyConfig penalty_config = GetPenaltyConfig();
   const std::string hist_prefix = GetHistoryPrefix(&request, *segments);
-  const double alpha = absl::GetFlag(FLAGS_gru_score_weight);
-  const bool show_score = absl::GetFlag(FLAGS_show_gru_score);
+  const double alpha = penalty_config.gru_score_weight;
+  const bool show_score = penalty_config.show_gru_score;
 
   const size_t start_seg_idx = segments->history_segments_size();
   return RerankSegmentsWithBeamSearch(
@@ -1303,13 +909,17 @@ bool GruRewriter::Focus(Segments* segments, size_t segment_index,
     return false;
   }
 
+  const GruPenaltyConfig penalty_config = GetPenaltyConfig();
+  if (!penalty_config.enable_gru_rewriter) {
+    return false;
+  }
+
   if (!EnsureInitialized()) {
     return false;
   }
 
-  const GruPenaltyConfig penalty_config = GetPenaltyConfig();
-  const double alpha = absl::GetFlag(FLAGS_gru_score_weight);
-  const bool show_score = absl::GetFlag(FLAGS_show_gru_score);
+  const double alpha = penalty_config.gru_score_weight;
+  const bool show_score = penalty_config.show_gru_score;
 
   // Build prefix text up to segment_index, incorporating the chosen candidate.
   std::string prefix_text;
@@ -1381,17 +991,18 @@ std::optional<RewriterInterface::ResizeSegmentsRequest> GruRewriter::CheckResize
     return std::nullopt;
   }
 
+  const GruPenaltyConfig penalty_config = GetPenaltyConfig();
+  if (!penalty_config.enable_gru_rewriter ||
+      !penalty_config.enable_resegmentation) {
+    return std::nullopt;
+  }
+
   if (!EnsureInitialized()) {
     return std::nullopt;
   }
 
-  const GruPenaltyConfig penalty_config = GetPenaltyConfig();
-  if (!penalty_config.enable_resegmentation) {
-    return std::nullopt;
-  }
-
   const std::string hist_prefix = GetHistoryPrefix(&request, segments);
-  const double alpha = absl::GetFlag(FLAGS_gru_score_weight);
+  const double alpha = penalty_config.gru_score_weight;
   const size_t start_seg_idx = segments.history_segments_size();
 
   auto result = EvaluateResegmentation(

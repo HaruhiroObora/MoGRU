@@ -1723,6 +1723,476 @@
          </item>
         </layout>
        </widget>
+       <widget class="QWidget" name="mogruTab">
+        <attribute name="title">
+         <string>MoGRU</string>
+        </attribute>
+        <layout class="QVBoxLayout" name="mogruTabVerticalLayout">
+         <property name="leftMargin">
+          <number>6</number>
+         </property>
+         <property name="topMargin">
+          <number>6</number>
+         </property>
+         <property name="rightMargin">
+          <number>6</number>
+         </property>
+         <property name="bottomMargin">
+          <number>6</number>
+         </property>
+         <item>
+          <widget class="QScrollArea" name="mogruScrollArea">
+           <property name="frameShape">
+            <enum>QFrame::Shape::NoFrame</enum>
+           </property>
+           <property name="widgetResizable">
+            <bool>true</bool>
+           </property>
+           <widget class="QWidget" name="mogruScrollAreaWidgetContents">
+            <layout class="QVBoxLayout" name="mogruScrollContentLayout">
+             <property name="spacing">
+              <number>8</number>
+             </property>
+             <item>
+              <widget class="QGroupBox" name="gruGeneralGroupBox">
+               <property name="title">
+                <string>MoGRU Neural Conversion Settings</string>
+               </property>
+               <layout class="QFormLayout" name="gruGeneralFormLayout">
+                <item row="0" column="0" colspan="2">
+                 <widget class="QCheckBox" name="enableGruRewriterCheckBox">
+                  <property name="text">
+                   <string>Enable GRU neural rewriter (Candidate reranking &amp; generation)</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="1" column="0" colspan="2">
+                 <widget class="QCheckBox" name="enableLiveConversionCheckBox">
+                  <property name="text">
+                   <string>Enable Live Conversion (Automatic conversion while typing)</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="2" column="0" colspan="2">
+                 <widget class="QCheckBox" name="showGruScoreCheckBox">
+                  <property name="text">
+                   <string>Show GRU score &amp; cost breakdown in candidate window</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="3" column="0">
+                 <widget class="QLabel" name="gruScoreWeightLabel">
+                  <property name="text">
+                   <string>GRU Score Weight (alpha):</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="3" column="1">
+                 <widget class="QDoubleSpinBox" name="gruScoreWeightSpinBox">
+                  <property name="decimals">
+                   <number>1</number>
+                  </property>
+                  <property name="minimum">
+                   <double>0.000000000000000</double>
+                  </property>
+                  <property name="maximum">
+                   <double>100000.000000000000000</double>
+                  </property>
+                  <property name="singleStep">
+                   <double>50.000000000000000</double>
+                  </property>
+                  <property name="value">
+                   <double>800.000000000000000</double>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+             </item>
+             <item>
+              <widget class="QGroupBox" name="gruModelPathsGroupBox">
+               <property name="title">
+                <string>Model Files (Leave empty for default installation paths)</string>
+               </property>
+               <layout class="QGridLayout" name="gruModelPathsGridLayout">
+                <item row="0" column="0">
+                 <widget class="QLabel" name="gruModelPathLabel">
+                  <property name="text">
+                   <string>GRU Model (grumodel.bin):</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="0" column="1">
+                 <widget class="QLineEdit" name="gruModelPathLineEdit"/>
+                </item>
+                <item row="0" column="2">
+                 <widget class="QPushButton" name="browseGruModelPathButton">
+                  <property name="text">
+                   <string>Browse...</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="1" column="0">
+                 <widget class="QLabel" name="gruChardataPathLabel">
+                  <property name="text">
+                   <string>Char Data (chardata.bin):</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="1" column="1">
+                 <widget class="QLineEdit" name="gruChardataPathLineEdit"/>
+                </item>
+                <item row="1" column="2">
+                 <widget class="QPushButton" name="browseGruChardataPathButton">
+                  <property name="text">
+                   <string>Browse...</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="2" column="0">
+                 <widget class="QLabel" name="gruUserModelPathLabel">
+                  <property name="text">
+                   <string>User Model (grumodel_user.bin):</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="2" column="1">
+                 <widget class="QLineEdit" name="gruUserModelPathLineEdit"/>
+                </item>
+                <item row="2" column="2">
+                 <widget class="QPushButton" name="browseGruUserModelPathButton">
+                  <property name="text">
+                   <string>Browse...</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+             </item>
+             <item>
+              <widget class="QGroupBox" name="gruResegmentationGroupBox">
+               <property name="title">
+                <string>Beam Search &amp; Resegmentation</string>
+               </property>
+               <layout class="QFormLayout" name="gruResegmentationFormLayout">
+                <item row="0" column="0" colspan="2">
+                 <widget class="QCheckBox" name="enableGruResegmentationCheckBox">
+                  <property name="text">
+                   <string>Enable Resegmentation (Re-run GRU beam search on unnatural boundaries)</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="1" column="0">
+                 <widget class="QLabel" name="gruResegmentThresholdLabel">
+                  <property name="text">
+                   <string>Resegment Threshold (avg NLL x alpha):</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="1" column="1">
+                 <widget class="QDoubleSpinBox" name="gruResegmentThresholdSpinBox">
+                  <property name="decimals">
+                   <number>1</number>
+                  </property>
+                  <property name="minimum">
+                   <double>0.000000000000000</double>
+                  </property>
+                  <property name="maximum">
+                   <double>100000.000000000000000</double>
+                  </property>
+                  <property name="singleStep">
+                   <double>50.000000000000000</double>
+                  </property>
+                  <property name="value">
+                   <double>600.000000000000000</double>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+             </item>
+             <item>
+              <widget class="QGroupBox" name="gruPenaltyGroupBox">
+               <property name="title">
+                <string>Script &amp; Character Penalties</string>
+               </property>
+               <layout class="QFormLayout" name="gruPenaltyFormLayout">
+                <item row="0" column="0">
+                 <widget class="QLabel" name="gruKatakanaMultiplierLabel">
+                  <property name="text">
+                   <string>Katakana Penalty Multiplier:</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="0" column="1">
+                 <widget class="QDoubleSpinBox" name="gruKatakanaMultiplierSpinBox">
+                  <property name="decimals">
+                   <number>2</number>
+                  </property>
+                  <property name="minimum">
+                   <double>0.000000000000000</double>
+                  </property>
+                  <property name="maximum">
+                   <double>100.000000000000000</double>
+                  </property>
+                  <property name="singleStep">
+                   <double>0.050000000000000</double>
+                  </property>
+                  <property name="value">
+                   <double>1.300000000000000</double>
+                  </property>
+                 </widget>
+                </item>
+                <item row="1" column="0">
+                 <widget class="QLabel" name="gruHiraganaMultiplierLabel">
+                  <property name="text">
+                   <string>Hiragana Penalty Multiplier:</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="1" column="1">
+                 <widget class="QDoubleSpinBox" name="gruHiraganaMultiplierSpinBox">
+                  <property name="decimals">
+                   <number>2</number>
+                  </property>
+                  <property name="minimum">
+                   <double>0.000000000000000</double>
+                  </property>
+                  <property name="maximum">
+                   <double>100.000000000000000</double>
+                  </property>
+                  <property name="singleStep">
+                   <double>0.050000000000000</double>
+                  </property>
+                  <property name="value">
+                   <double>1.100000000000000</double>
+                  </property>
+                 </widget>
+                </item>
+                <item row="2" column="0">
+                 <widget class="QLabel" name="gruHiraganaLengthPowerLabel">
+                  <property name="text">
+                   <string>Hiragana Length Power:</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="2" column="1">
+                 <widget class="QDoubleSpinBox" name="gruHiraganaLengthPowerSpinBox">
+                  <property name="decimals">
+                   <number>2</number>
+                  </property>
+                  <property name="minimum">
+                   <double>0.000000000000000</double>
+                  </property>
+                  <property name="maximum">
+                   <double>10.000000000000000</double>
+                  </property>
+                  <property name="singleStep">
+                   <double>0.100000000000000</double>
+                  </property>
+                  <property name="value">
+                   <double>1.000000000000000</double>
+                  </property>
+                 </widget>
+                </item>
+                <item row="3" column="0">
+                 <widget class="QLabel" name="gruAlphabetMultiplierLabel">
+                  <property name="text">
+                   <string>Alphabet Penalty Multiplier:</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="3" column="1">
+                 <widget class="QDoubleSpinBox" name="gruAlphabetMultiplierSpinBox">
+                  <property name="decimals">
+                   <number>2</number>
+                  </property>
+                  <property name="minimum">
+                   <double>0.000000000000000</double>
+                  </property>
+                  <property name="maximum">
+                   <double>100.000000000000000</double>
+                  </property>
+                  <property name="singleStep">
+                   <double>0.100000000000000</double>
+                  </property>
+                  <property name="value">
+                   <double>2.000000000000000</double>
+                  </property>
+                 </widget>
+                </item>
+                <item row="4" column="0">
+                 <widget class="QLabel" name="gruEmojiPenaltyLabel">
+                  <property name="text">
+                   <string>Emoji Fixed Penalty:</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="4" column="1">
+                 <widget class="QDoubleSpinBox" name="gruEmojiPenaltySpinBox">
+                  <property name="decimals">
+                   <number>1</number>
+                  </property>
+                  <property name="minimum">
+                   <double>0.000000000000000</double>
+                  </property>
+                  <property name="maximum">
+                   <double>1000000.000000000000000</double>
+                  </property>
+                  <property name="singleStep">
+                   <double>500.000000000000000</double>
+                  </property>
+                  <property name="value">
+                   <double>15000.000000000000000</double>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+             </item>
+             <item>
+              <widget class="QGroupBox" name="gruOnlineLearningGroupBox">
+               <property name="title">
+                <string>Online Learning (Personalization)</string>
+               </property>
+               <layout class="QFormLayout" name="gruOnlineLearningFormLayout">
+                <item row="0" column="0" colspan="2">
+                 <widget class="QCheckBox" name="enableGruOnlineLearningCheckBox">
+                  <property name="text">
+                   <string>Enable Online Learning on candidate commit</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="1" column="0">
+                 <widget class="QLabel" name="gruOnlineLearningModeLabel">
+                  <property name="text">
+                   <string>Online Learning Mode:</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="1" column="1">
+                 <widget class="QComboBox" name="gruOnlineLearningModeComboBox"/>
+                </item>
+                <item row="2" column="0">
+                 <widget class="QLabel" name="gruOnlineLearningRateLabel">
+                  <property name="text">
+                   <string>Learning Rate:</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="2" column="1">
+                 <widget class="QDoubleSpinBox" name="gruOnlineLearningRateSpinBox">
+                  <property name="decimals">
+                   <number>5</number>
+                  </property>
+                  <property name="minimum">
+                   <double>0.000000000000000</double>
+                  </property>
+                  <property name="maximum">
+                   <double>1.000000000000000</double>
+                  </property>
+                  <property name="singleStep">
+                   <double>0.001000000000000</double>
+                  </property>
+                  <property name="value">
+                   <double>0.005000000000000</double>
+                  </property>
+                 </widget>
+                </item>
+                <item row="3" column="0">
+                 <widget class="QLabel" name="gruOnlineLearningWeightDecayLabel">
+                  <property name="text">
+                   <string>Weight Decay (L2 to base model):</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="3" column="1">
+                 <widget class="QDoubleSpinBox" name="gruOnlineLearningWeightDecaySpinBox">
+                  <property name="decimals">
+                   <number>5</number>
+                  </property>
+                  <property name="minimum">
+                   <double>0.000000000000000</double>
+                  </property>
+                  <property name="maximum">
+                   <double>1.000000000000000</double>
+                  </property>
+                  <property name="singleStep">
+                   <double>0.000500000000000</double>
+                  </property>
+                  <property name="value">
+                   <double>0.001000000000000</double>
+                  </property>
+                 </widget>
+                </item>
+                <item row="4" column="0">
+                 <widget class="QLabel" name="gruOnlineLearningSaveIntervalLabel">
+                  <property name="text">
+                   <string>Save Interval (commits):</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="4" column="1">
+                 <widget class="QSpinBox" name="gruOnlineLearningSaveIntervalSpinBox">
+                  <property name="minimum">
+                   <number>1</number>
+                  </property>
+                  <property name="maximum">
+                   <number>1000</number>
+                  </property>
+                  <property name="value">
+                   <number>5</number>
+                  </property>
+                 </widget>
+                </item>
+                <item row="5" column="0" colspan="2">
+                 <widget class="QPushButton" name="resetGruUserModelButton">
+                  <property name="text">
+                   <string>Reset Learned GRU Model (Delete grumodel_user.bin)</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+             </item>
+             <item>
+              <widget class="QGroupBox" name="gruConfigFileGroupBox">
+               <property name="title">
+                <string>Configuration File (gru_config.ini Synchronization)</string>
+               </property>
+               <layout class="QHBoxLayout" name="gruConfigFileLayout">
+                <item>
+                 <widget class="QLabel" name="gruConfigFilePathLabel">
+                  <property name="text">
+                   <string>gru_config.ini</string>
+                  </property>
+                  <property name="textInteractionFlags">
+                   <set>Qt::TextInteractionFlag::LinksAccessibleByMouse|Qt::TextInteractionFlag::TextSelectableByMouse</set>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="reloadGruConfigButton">
+                  <property name="sizePolicy">
+                   <sizepolicy hsizetype="Maximum" vsizetype="Fixed">
+                    <horstretch>0</horstretch>
+                    <verstretch>0</verstretch>
+                   </sizepolicy>
+                  </property>
+                  <property name="text">
+                   <string>Reload from gru_config.ini</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+          </widget>
+         </item>
+        </layout>
+       </widget>
       </widget>
      </item>
     </layout>

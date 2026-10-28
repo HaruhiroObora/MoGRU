@@ -93,14 +93,27 @@ EXPORTS_FILES_TEMPLATE = """
 exports_files(glob(["libexec/*"], allow_empty=True))
 """
 
+def _resolve_packages(repo_ctx, binary):
+    packages = repo_ctx.attr.packages
+    result = repo_ctx.execute([binary, "--exists"] + packages)
+    if result.return_code == 0:
+        return packages
+    if "Qt6Core" in packages:
+        qt5_packages = [p.replace("Qt6", "Qt5") for p in packages]
+        res5 = repo_ctx.execute([binary, "--exists"] + qt5_packages)
+        if res5.return_code == 0:
+            return qt5_packages
+    return packages
+
 def _exec_pkg_config(repo_ctx, flags):
     binary = repo_ctx.which("pkg-config")
     if not binary:
         fail("pkg-config binary is not found in PATH")
 
-    result = repo_ctx.execute([binary] + flags + repo_ctx.attr.packages)
+    packages = _resolve_packages(repo_ctx, binary)
+    result = repo_ctx.execute([binary] + flags + packages)
     if result.return_code != 0:
-        fail("pkg-config failed for packages %s:\n%s" % (repo_ctx.attr.packages, result.stderr))
+        fail("pkg-config failed for packages %s:\n%s" % (packages, result.stderr))
 
     items = result.stdout.strip().split(" ")
     uniq_items = sorted({key: None for key in items}.keys())
@@ -192,7 +205,9 @@ def _pkg_config_repository_impl(repo_ctx):
     build_file_data = BUILD_TEMPLATE.format(**data)
 
     libexecdir = _exec_pkg_config(repo_ctx, ["--variable=libexecdir"])
-    if len(libexecdir) == 1:
+    if not libexecdir or libexecdir[0] == "":
+        libexecdir = _exec_pkg_config(repo_ctx, ["--variable=host_bins"])
+    if len(libexecdir) == 1 and libexecdir[0] != "":
         repo_ctx.symlink(libexecdir[0], "libexec")
         build_file_data += EXPORTS_FILES_TEMPLATE
 

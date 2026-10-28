@@ -1759,6 +1759,7 @@ mozc_cc_library(
         "//base:system_util",
         "//base:util",
         "//base:vlog",
+        "//config:gru_config",
         "//converter:attribute",
         "//converter:immutable_converter_interface",
         "//converter:inner_segment",

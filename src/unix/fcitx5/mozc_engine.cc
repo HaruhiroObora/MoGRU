@@ -42,8 +42,11 @@
 
 #include "absl/flags/declare.h"
 #include "absl/flags/flag.h"
+#include "absl/strings/numbers.h"
+#include "absl/strings/str_format.h"
 #include "base/init_mozc.h"
 #include "base/process.h"
+#include "config/gru_config.h"
 #include "protocol/commands.pb.h"
 #include "unix/fcitx5/i18nwrapper.h"
 #include "unix/fcitx5/mozc_client_interface.h"
@@ -51,13 +54,16 @@
 #include "unix/fcitx5/mozc_response_parser.h"
 #include "unix/fcitx5/mozc_state.h"
 
+ABSL_DECLARE_FLAG(bool, enable_gru_rewriter);
 ABSL_DECLARE_FLAG(std::string, gru_model_path);
 ABSL_DECLARE_FLAG(std::string, gru_chardata_path);
+ABSL_DECLARE_FLAG(std::string, gru_user_model_path);
 ABSL_DECLARE_FLAG(double, gru_score_weight);
 ABSL_DECLARE_FLAG(bool, show_gru_score);
 ABSL_DECLARE_FLAG(bool, enable_gru_resegmentation);
 ABSL_DECLARE_FLAG(int32_t, gru_resegment_cost_threshold);
 ABSL_DECLARE_FLAG(bool, enable_live_conversion);
+ABSL_DECLARE_FLAG(bool, enable_gru_online_learning);
 
 namespace fcitx {
 
@@ -270,26 +276,24 @@ std::string MozcEngine::GetConfigPath() const {
   return preferred_path;
 }
 
+const Configuration* MozcEngine::getConfig() const {
+  return &config_;
+}
+
 void MozcEngine::SyncGruFlags() {
-  std::string model_path = config_.gruModelPath.value();
-  if (model_path.empty()) {
-    model_path = MozcEngineConfig::GetPreferredModelPath("grumodel.bin");
-  }
-  std::string chardata_path = config_.gruChardataPath.value();
-  if (chardata_path.empty()) {
-    chardata_path = MozcEngineConfig::GetPreferredModelPath("chardata.bin");
-  }
-  absl::SetFlag(&FLAGS_gru_model_path, model_path);
-  absl::SetFlag(&FLAGS_gru_chardata_path, chardata_path);
-  absl::SetFlag(&FLAGS_gru_score_weight,
-                static_cast<double>(config_.gruScoreWeight.value()));
-  absl::SetFlag(&FLAGS_show_gru_score, config_.showGruScore.value());
-  absl::SetFlag(&FLAGS_enable_gru_resegmentation,
-                config_.enableGruResegmentation.value());
+  const mozc::GruPenaltyConfig cfg =
+      mozc::config::GruConfigManager::LoadConfig();
+  absl::SetFlag(&FLAGS_enable_gru_rewriter, cfg.enable_gru_rewriter);
+  absl::SetFlag(&FLAGS_gru_model_path, cfg.gru_model_path);
+  absl::SetFlag(&FLAGS_gru_chardata_path, cfg.gru_chardata_path);
+  absl::SetFlag(&FLAGS_gru_user_model_path, cfg.gru_user_model_path);
+  absl::SetFlag(&FLAGS_gru_score_weight, cfg.gru_score_weight);
+  absl::SetFlag(&FLAGS_show_gru_score, cfg.show_gru_score);
+  absl::SetFlag(&FLAGS_enable_gru_resegmentation, cfg.enable_resegmentation);
   absl::SetFlag(&FLAGS_gru_resegment_cost_threshold,
-                config_.gruResegmentCostThreshold.value());
-  absl::SetFlag(&FLAGS_enable_live_conversion,
-                config_.enableLiveConversion.value());
+                static_cast<int32_t>(cfg.resegment_threshold));
+  absl::SetFlag(&FLAGS_enable_live_conversion, cfg.enable_live_conversion);
+  absl::SetFlag(&FLAGS_enable_gru_online_learning, cfg.enable_online_learning);
 }
 
 void MozcEngine::setConfig(const RawConfig& config) {
@@ -301,20 +305,7 @@ void MozcEngine::setConfig(const RawConfig& config) {
 
 void MozcEngine::reloadConfig() {
   readAsIni(config_, GetConfigPath());
-  bool modified = false;
-  if (config_.gruModelPath.value().empty()) {
-    config_.gruModelPath.setValue(
-        MozcEngineConfig::GetPreferredModelPath("grumodel.bin"));
-    modified = true;
-  }
-  if (config_.gruChardataPath.value().empty()) {
-    config_.gruChardataPath.setValue(
-        MozcEngineConfig::GetPreferredModelPath("chardata.bin"));
-    modified = true;
-  }
-  if (modified) {
-    safeSaveAsIni(config_, GetConfigPath());
-  }
+  safeSaveAsIni(config_, GetConfigPath());
   SyncGruFlags();
   ResetClientPool();
 }

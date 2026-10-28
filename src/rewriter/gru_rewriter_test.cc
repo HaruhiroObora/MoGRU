@@ -1078,6 +1078,116 @@ TEST_F(GruRewriterTest, OnlineLearningSkippedWhenNoHistoryLearningAttribute) {
   EXPECT_EQ(after_segments.segment(0).candidate(0).description, base_desc);
 }
 
+TEST_F(GruRewriterTest, GruConfigManagerSaveAndLoadAllSettingsRoundTrip) {
+  const std::string test_config = FileUtil::JoinPath(
+      std::filesystem::temp_directory_path().string(),
+      "gru_full_roundtrip_config.ini");
+  std::error_code ec;
+  std::filesystem::remove(test_config, ec);
+
+  GruPenaltyConfig saved;
+  saved.enable_gru_rewriter = false;
+  saved.enable_live_conversion = false;
+  saved.gru_model_path = "/custom/path/grumodel.bin";
+  saved.gru_chardata_path = "/custom/path/chardata.bin";
+  saved.gru_user_model_path = "/custom/path/grumodel_user.bin";
+  saved.gru_score_weight = 1250.0;
+  saved.show_gru_score = false;
+  saved.katakana_multiplier = 1.65;
+  saved.hiragana_multiplier = 1.25;
+  saved.hiragana_length_power = 1.4;
+  saved.emoji_penalty = 22000.0;
+  saved.alphabet_multiplier = 2.75;
+  saved.enable_resegmentation = false;
+  saved.resegment_threshold = 950.0;
+  saved.enable_online_learning = false;
+  saved.online_learning_mode = "full";
+  saved.online_learning_rate = 0.0125;
+  saved.online_learning_weight_decay = 0.0025;
+  saved.online_learning_save_interval = 12;
+
+  ASSERT_TRUE(config::GruConfigManager::SaveConfig(saved, test_config));
+  const GruPenaltyConfig loaded =
+      config::GruConfigManager::LoadConfig(test_config);
+
+  EXPECT_EQ(loaded.enable_gru_rewriter, false);
+  EXPECT_EQ(loaded.enable_live_conversion, false);
+  EXPECT_EQ(loaded.gru_model_path, "/custom/path/grumodel.bin");
+  EXPECT_EQ(loaded.gru_chardata_path, "/custom/path/chardata.bin");
+  EXPECT_EQ(loaded.gru_user_model_path, "/custom/path/grumodel_user.bin");
+  EXPECT_NEAR(loaded.gru_score_weight, 1250.0, 1e-4);
+  EXPECT_EQ(loaded.show_gru_score, false);
+  EXPECT_NEAR(loaded.katakana_multiplier, 1.65, 1e-4);
+  EXPECT_NEAR(loaded.hiragana_multiplier, 1.25, 1e-4);
+  EXPECT_NEAR(loaded.hiragana_length_power, 1.4, 1e-4);
+  EXPECT_NEAR(loaded.emoji_penalty, 22000.0, 1e-4);
+  EXPECT_NEAR(loaded.alphabet_multiplier, 2.75, 1e-4);
+  EXPECT_EQ(loaded.enable_resegmentation, false);
+  EXPECT_NEAR(loaded.resegment_threshold, 950.0, 1e-4);
+  EXPECT_EQ(loaded.enable_online_learning, false);
+  EXPECT_EQ(loaded.online_learning_mode, "full");
+  EXPECT_NEAR(loaded.online_learning_rate, 0.0125, 1e-6);
+  EXPECT_NEAR(loaded.online_learning_weight_decay, 0.0025, 1e-6);
+  EXPECT_EQ(loaded.online_learning_save_interval, 12);
+
+  EXPECT_FALSE(
+      config::GruConfigManager::IsLiveConversionEnabled(true, test_config));
+
+  std::filesystem::remove(test_config, ec);
+}
+
+TEST_F(GruRewriterTest, HotReloadGuiSettingsFromConfigIni) {
+  const std::string test_config = FileUtil::JoinPath(
+      std::filesystem::temp_directory_path().string(),
+      "gru_gui_hotreload_config.ini");
+  std::error_code ec;
+  std::filesystem::remove(test_config, ec);
+
+  GruPenaltyConfig cfg;
+  cfg.enable_gru_rewriter = true;
+  cfg.show_gru_score = false;
+  cfg.gru_score_weight = 800.0;
+  ASSERT_TRUE(config::GruConfigManager::SaveConfig(cfg, test_config));
+
+  absl::SetFlag(&FLAGS_gru_config_path, test_config);
+  ASSERT_TRUE(rewriter_->Reload());
+
+  ConversionRequest request;
+  {
+    Segments segments;
+    Segment* seg = segments.add_segment();
+    seg->set_key("きょうは");
+    AddCandidate("きょうは", "今日は", 1000, seg);
+    AddCandidate("きょうは", "教派", 1000, seg);
+    EXPECT_TRUE(rewriter_->Rewrite(request, &segments));
+    EXPECT_EQ(seg->candidate(0).value, "教派");
+    // show_gru_score = false in gru_config.ini -> no "GRU:" in description
+    EXPECT_EQ(seg->candidate(0).description.find("GRU:"), std::string::npos);
+  }
+
+  // Update gru_config.ini to disable enable_gru_rewriter
+  cfg.enable_gru_rewriter = false;
+  ASSERT_TRUE(config::GruConfigManager::SaveConfig(cfg, test_config));
+  std::filesystem::last_write_time(
+      test_config,
+      std::filesystem::last_write_time(test_config) + std::chrono::seconds(2),
+      ec);
+  ASSERT_TRUE(rewriter_->Reload());
+
+  {
+    Segments segments;
+    Segment* seg = segments.add_segment();
+    seg->set_key("きょうは");
+    AddCandidate("きょうは", "今日は", 1000, seg);
+    AddCandidate("きょうは", "教派", 1000, seg);
+    EXPECT_FALSE(rewriter_->Rewrite(request, &segments));
+    EXPECT_EQ(seg->candidate(0).value, "今日は");
+  }
+
+  std::filesystem::remove(test_config, ec);
+  absl::SetFlag(&FLAGS_gru_config_path, "");
+}
+
 }  // namespace
 }  // namespace mozc
 

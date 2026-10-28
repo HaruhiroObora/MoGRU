@@ -76,7 +76,11 @@ void InstallDefaultTranslator() {
   // Load "<translation_path>/qt_<lang>.qm" from a qrc file.
   bool loaded = translator->load(
       QLocale::system(), QLatin1String("qt"), QLatin1String("_"),
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
       QLibraryInfo::path(QLibraryInfo::TranslationsPath),
+#else
+      QLibraryInfo::location(QLibraryInfo::TranslationsPath),
+#endif
       QLatin1String(".qm"));
   if (loaded) {
     qApp->installTranslator(translator.get());

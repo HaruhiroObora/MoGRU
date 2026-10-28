@@ -117,6 +117,7 @@ mozc_cc_library(
         "//base:run_level",
         "//base:util",
         "//base:vlog",
+        "//config:gru_config",
         "//protocol:candidate_window_cc_proto",
         "//protocol:commands_cc_proto",
         "@com_google_absl//absl/flags:flag",
