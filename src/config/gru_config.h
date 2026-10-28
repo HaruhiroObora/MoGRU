@@ -39,6 +39,8 @@ namespace mozc {
 struct GruPenaltyConfig {
   bool enable_gru_rewriter = true;
   bool enable_live_conversion = true;
+  bool show_segment_separator_in_conversion = false;
+  bool show_segment_separator_in_live_conversion = false;
   std::string gru_model_path = "";
   std::string gru_chardata_path = "";
   std::string gru_user_model_path = "";
@@ -113,6 +115,18 @@ class GruConfigManager {
   // enabled in gru_config.ini.
   static bool IsLiveConversionEnabled(
       bool flag_default,
+      const std::string& explicit_config_path = "");
+
+  // Fast (1-second throttled mtime check) query for whether segment separator
+  // in conversion is enabled in gru_config.ini.
+  static bool IsShowSegmentSeparatorInConversionEnabled(
+      bool flag_default = false,
+      const std::string& explicit_config_path = "");
+
+  // Fast (1-second throttled mtime check) query for whether segment separator
+  // in live conversion is enabled in gru_config.ini.
+  static bool IsShowSegmentSeparatorInLiveConversionEnabled(
+      bool flag_default = false,
       const std::string& explicit_config_path = "");
 };
 

@@ -479,7 +479,8 @@ absl::string_view GetKey(const Segment& segment,
 }  // namespace
 
 void FillConversion(const Segments& segments, const size_t segment_index,
-                    const int candidate_id, commands::Preedit* preedit) {
+                    const int candidate_id, const bool show_segment_separator,
+                    commands::Preedit* preedit) {
   constexpr uint32_t kBaseType = CONVERSION;
   // Cursor position in conversion state should be the end of the preedit.
   size_t cursor = 0;
@@ -491,7 +492,18 @@ void FillConversion(const Segments& segments, const size_t segment_index,
   const size_t focused_segment_index =
       std::min<size_t>(segment_index, conversion_segments.size() - 1);
 
+  bool first_segment = true;
   for (size_t i = 0; i < conversion_segments.size();) {
+    if (show_segment_separator && !first_segment) {
+      commands::Preedit::Segment* sep = preedit->add_segment();
+      sep->set_key("/");
+      sep->set_value("/");
+      sep->set_value_length(1);
+      sep->set_annotation(commands::Preedit::Segment::NONE);
+      cursor += 1;
+    }
+    first_segment = false;
+
     const Segment& segment = conversion_segments[i];
     if (i == focused_segment_index) {
       const converter::Candidate& candidate = segment.candidate(candidate_id);
@@ -511,6 +523,11 @@ void FillConversion(const Segments& segments, const size_t segment_index,
     }
   }
   preedit->set_cursor(cursor);
+}
+
+void FillConversion(const Segments& segments, const size_t segment_index,
+                    const int candidate_id, commands::Preedit* preedit) {
+  FillConversion(segments, segment_index, candidate_id, false, preedit);
 }
 
 void FillConversionResultWithoutNormalization(std::string key,

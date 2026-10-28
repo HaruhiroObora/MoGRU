@@ -96,6 +96,9 @@ void FillPreedit(const composer::Composer& composer,
 // Fill the Preedit protobuf with the contents of segments as a conversion.
 void FillConversion(const Segments& segments, size_t segment_index,
                     int candidate_id, commands::Preedit* preedit);
+void FillConversion(const Segments& segments, size_t segment_index,
+                    int candidate_id, bool show_segment_separator,
+                    commands::Preedit* preedit);
 
 enum SegmentType {
   PREEDIT = 1,

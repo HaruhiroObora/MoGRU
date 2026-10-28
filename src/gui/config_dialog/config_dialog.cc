@@ -895,6 +895,10 @@ void ConfigDialog::SetupMogruUi() {
         QString::fromUtf8("ライブ変換（入力中の自動かな漢字変換）を有効にする"));
     showGruScoreCheckBox->setText(
         QString::fromUtf8("候補ウィンドウにGRUスコアとコスト内訳を表示する"));
+    showSegmentSeparatorInConversionCheckBox->setText(
+        QString::fromUtf8("通常変換時（スペースキー等）に文節区切り「/」を表示する"));
+    showSegmentSeparatorInLiveConversionCheckBox->setText(
+        QString::fromUtf8("ライブ変換時にも文節区切り「/」を表示する"));
     gruScoreWeightLabel->setText(
         QString::fromUtf8("GRUスコア重み (α / gru_score_weight):"));
 
@@ -970,6 +974,10 @@ void ConfigDialog::LoadGruConfigToUi(const GruPenaltyConfig& gru_config) {
   enableGruRewriterCheckBox->setChecked(gru_config.enable_gru_rewriter);
   enableLiveConversionCheckBox->setChecked(gru_config.enable_live_conversion);
   showGruScoreCheckBox->setChecked(gru_config.show_gru_score);
+  showSegmentSeparatorInConversionCheckBox->setChecked(
+      gru_config.show_segment_separator_in_conversion);
+  showSegmentSeparatorInLiveConversionCheckBox->setChecked(
+      gru_config.show_segment_separator_in_live_conversion);
   gruScoreWeightSpinBox->setValue(gru_config.gru_score_weight);
 
   gruModelPathLineEdit->setText(
@@ -1009,6 +1017,10 @@ GruPenaltyConfig ConfigDialog::CollectGruConfigFromUi() const {
   cfg.enable_gru_rewriter = enableGruRewriterCheckBox->isChecked();
   cfg.enable_live_conversion = enableLiveConversionCheckBox->isChecked();
   cfg.show_gru_score = showGruScoreCheckBox->isChecked();
+  cfg.show_segment_separator_in_conversion =
+      showSegmentSeparatorInConversionCheckBox->isChecked();
+  cfg.show_segment_separator_in_live_conversion =
+      showSegmentSeparatorInLiveConversionCheckBox->isChecked();
   cfg.gru_score_weight = gruScoreWeightSpinBox->value();
 
   cfg.gru_model_path =

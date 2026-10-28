@@ -262,6 +262,14 @@ std::string GruConfigManager::FormatConfigIni(const GruPenaltyConfig& config) {
       "# - true: 有効, false: 無効（スペースキーで変換）\n"
       "enable_live_conversion = %s\n"
       "\n"
+      "# 【通常変換時（スペースキー等）の文節区切り「/」表示】 (初期値: false)\n"
+      "# - true: 変換中のプリエディットに文節区切り「/」を表示, false: 非表示\n"
+      "show_segment_separator_in_conversion = %s\n"
+      "\n"
+      "# 【ライブ変換時の文節区切り「/」表示】 (初期値: false)\n"
+      "# - true: ライブ変換中のプリエディットに文節区切り「/」を表示, false: 非表示\n"
+      "show_segment_separator_in_live_conversion = %s\n"
+      "\n"
       "# 【ベース言語モデルファイル (grumodel.bin) のパス】 (初期値: 空欄 = 標準パスを自動検出)\n"
       "gru_model_path = %s\n"
       "\n"
@@ -344,6 +352,8 @@ std::string GruConfigManager::FormatConfigIni(const GruPenaltyConfig& config) {
       "online_learning_save_interval = %d\n",
       config.enable_gru_rewriter ? "true" : "false",
       config.enable_live_conversion ? "true" : "false",
+      config.show_segment_separator_in_conversion ? "true" : "false",
+      config.show_segment_separator_in_live_conversion ? "true" : "false",
       config.gru_model_path,
       config.gru_chardata_path,
       config.gru_user_model_path,
@@ -417,6 +427,16 @@ void GruConfigManager::EnsureConfigFileExists(const std::string& path) {
     append_content +=
         "\n# 【リアルタイム・ライブ変換の有効化】 (初期値: true)\n"
         "enable_live_conversion = true\n";
+  }
+  if (content.find("show_segment_separator_in_conversion") == std::string::npos) {
+    append_content +=
+        "\n# 【通常変換時（スペースキー等）の文節区切り「/」表示】 (初期値: false)\n"
+        "show_segment_separator_in_conversion = false\n";
+  }
+  if (content.find("show_segment_separator_in_live_conversion") == std::string::npos) {
+    append_content +=
+        "\n# 【ライブ変換時の文節区切り「/」表示】 (初期値: false)\n"
+        "show_segment_separator_in_live_conversion = false\n";
   }
   if (content.find("gru_model_path") == std::string::npos) {
     append_content +=
@@ -575,6 +595,21 @@ GruPenaltyConfig GruConfigManager::ParseConfigFile(
       }
       continue;
     }
+    if (key == "show_segment_separator_in_conversion" ||
+        key == "show_segment_separator") {
+      bool b = false;
+      if (absl::SimpleAtob(val, &b)) {
+        config.show_segment_separator_in_conversion = b;
+      }
+      continue;
+    }
+    if (key == "show_segment_separator_in_live_conversion") {
+      bool b = false;
+      if (absl::SimpleAtob(val, &b)) {
+        config.show_segment_separator_in_live_conversion = b;
+      }
+      continue;
+    }
     if (key == "show_gru_score") {
       bool b = true;
       if (absl::SimpleAtob(val, &b)) {
@@ -655,6 +690,14 @@ void GruConfigManager::ApplyEnvOverrides(GruPenaltyConfig* config) {
   if (const char* e = std::getenv("MOZC_GRU_ENABLE_LIVE_CONVERSION")) {
     bool b = true;
     if (absl::SimpleAtob(e, &b)) config->enable_live_conversion = b;
+  }
+  if (const char* e = std::getenv("MOZC_GRU_SHOW_SEGMENT_SEPARATOR_IN_CONVERSION")) {
+    bool b = false;
+    if (absl::SimpleAtob(e, &b)) config->show_segment_separator_in_conversion = b;
+  }
+  if (const char* e = std::getenv("MOZC_GRU_SHOW_SEGMENT_SEPARATOR_IN_LIVE_CONVERSION")) {
+    bool b = false;
+    if (absl::SimpleAtob(e, &b)) config->show_segment_separator_in_live_conversion = b;
   }
   if (const char* e = std::getenv("MOZC_GRU_MODEL_PATH")) {
     if (e[0] != '\0') config->gru_model_path = e;
@@ -825,6 +868,84 @@ bool GruConfigManager::IsLiveConversionEnabled(
     GruPenaltyConfig parsed = ParseConfigFile(path, base);
     ApplyEnvOverrides(&parsed);
     cached_value = parsed.enable_live_conversion;
+    has_cached = true;
+  }
+  return cached_value;
+}
+
+bool GruConfigManager::IsShowSegmentSeparatorInConversionEnabled(
+    bool flag_default,
+    const std::string& explicit_config_path) {
+  static absl::NoDestructor<absl::Mutex> mutex;
+  static absl::Time last_check_time = absl::InfinitePast();
+  static int64_t last_mtime = -1;
+  static std::string last_path;
+  static bool cached_value = false;
+  static bool has_cached = false;
+
+  absl::MutexLock lock(*mutex);
+  const std::string path =
+      ResolveConfigFilePath(explicit_config_path, /*allow_in_test=*/false);
+  if (path.empty()) {
+    return flag_default;
+  }
+
+  const absl::Time now = absl::Now();
+  if (has_cached && path == last_path &&
+      (now - last_check_time) < absl::Seconds(1)) {
+    return cached_value;
+  }
+  last_check_time = now;
+
+  EnsureConfigFileExists(path);
+  const int64_t mtime = GetFileMtime(path);
+  if (!has_cached || path != last_path || mtime != last_mtime) {
+    last_path = path;
+    last_mtime = mtime;
+    GruPenaltyConfig base;
+    base.show_segment_separator_in_conversion = flag_default;
+    GruPenaltyConfig parsed = ParseConfigFile(path, base);
+    ApplyEnvOverrides(&parsed);
+    cached_value = parsed.show_segment_separator_in_conversion;
+    has_cached = true;
+  }
+  return cached_value;
+}
+
+bool GruConfigManager::IsShowSegmentSeparatorInLiveConversionEnabled(
+    bool flag_default,
+    const std::string& explicit_config_path) {
+  static absl::NoDestructor<absl::Mutex> mutex;
+  static absl::Time last_check_time = absl::InfinitePast();
+  static int64_t last_mtime = -1;
+  static std::string last_path;
+  static bool cached_value = false;
+  static bool has_cached = false;
+
+  absl::MutexLock lock(*mutex);
+  const std::string path =
+      ResolveConfigFilePath(explicit_config_path, /*allow_in_test=*/false);
+  if (path.empty()) {
+    return flag_default;
+  }
+
+  const absl::Time now = absl::Now();
+  if (has_cached && path == last_path &&
+      (now - last_check_time) < absl::Seconds(1)) {
+    return cached_value;
+  }
+  last_check_time = now;
+
+  EnsureConfigFileExists(path);
+  const int64_t mtime = GetFileMtime(path);
+  if (!has_cached || path != last_path || mtime != last_mtime) {
+    last_path = path;
+    last_mtime = mtime;
+    GruPenaltyConfig base;
+    base.show_segment_separator_in_live_conversion = flag_default;
+    GruPenaltyConfig parsed = ParseConfigFile(path, base);
+    ApplyEnvOverrides(&parsed);
+    cached_value = parsed.show_segment_separator_in_live_conversion;
     has_cached = true;
   }
   return cached_value;

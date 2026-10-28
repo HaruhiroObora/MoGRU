@@ -1840,14 +1840,19 @@ bool EngineConverter::IsFullSentenceCandidateSelected() const {
 
 void EngineConverter::FillConversion(commands::Preedit* preedit) const {
   DCHECK(CheckState(PREDICTION | CONVERSION));
+  const bool show_sep =
+      config::GruConfigManager::IsShowSegmentSeparatorInConversionEnabled(false);
   output::FillConversion(segments_, segment_index_,
-                         candidate_list_.focused_id(), preedit);
+                         candidate_list_.focused_id(), show_sep, preedit);
 }
 
 void EngineConverter::FillLiveConversionPreedit(
     const composer::Composer& composer, commands::Preedit* preedit) const {
   DCHECK(CheckState(SUGGESTION));
+  const bool show_sep =
+      config::GruConfigManager::IsShowSegmentSeparatorInLiveConversionEnabled(false);
   size_t cursor = 0;
+  bool first_segment = true;
   for (size_t i = 0; i < segments_.conversion_segments_size();
        i += GetSegmentSpan(i)) {
     const Segment& segment = segments_.conversion_segment(i);
@@ -1863,6 +1868,15 @@ void EngineConverter::FillLiveConversionPreedit(
     if (candidate.value.empty()) {
       continue;
     }
+    if (show_sep && !first_segment) {
+      commands::Preedit::Segment* sep = preedit->add_segment();
+      sep->set_key("/");
+      sep->set_value("/");
+      sep->set_value_length(1);
+      sep->set_annotation(commands::Preedit::Segment::NONE);
+      cursor += 1;
+    }
+    first_segment = false;
     commands::Preedit::Segment* seg = preedit->add_segment();
     seg->set_key(std::move(normalized_key));
     seg->set_value_length(Util::CharsLen(candidate.value));
@@ -1874,6 +1888,14 @@ void EngineConverter::FillLiveConversionPreedit(
     std::string normalized_tail =
         TextNormalizer::NormalizeText(live_conversion_tail_);
     if (!normalized_tail.empty()) {
+      if (show_sep && !first_segment) {
+        commands::Preedit::Segment* sep = preedit->add_segment();
+        sep->set_key("/");
+        sep->set_value("/");
+        sep->set_value_length(1);
+        sep->set_annotation(commands::Preedit::Segment::NONE);
+        cursor += 1;
+      }
       commands::Preedit::Segment* tail_seg = preedit->add_segment();
       tail_seg->set_key(normalized_tail);
       tail_seg->set_value_length(Util::CharsLen(normalized_tail));

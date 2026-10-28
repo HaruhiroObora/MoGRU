@@ -1054,5 +1054,100 @@ TEST(EngineOutputTest, FillConversion_MultiSegmentSpan) {
   }
 }
 
+TEST(EngineOutputTest, FillConversion_SegmentSeparator) {
+  Segments segments;
+  Segment* seg0 = segments.add_segment();
+  seg0->set_key("きょうは");
+  converter::Candidate* cand0 = seg0->push_back_candidate();
+  cand0->value = "今日";
+  cand0->key = "きょうは";
+
+  Segment* seg1 = segments.add_segment();
+  seg1->set_key("いい");
+  converter::Candidate* cand1 = seg1->push_back_candidate();
+  cand1->value = "いい";
+  cand1->key = "いい";
+
+  Segment* seg2 = segments.add_segment();
+  seg2->set_key("てんきです");
+  converter::Candidate* cand2 = seg2->push_back_candidate();
+  cand2->value = "天気です";
+  cand2->key = "てんきです";
+
+  // When show_segment_separator = true and focus on seg0 (index 0)
+  {
+    commands::Preedit preedit;
+    output::FillConversion(segments, 0, 0, /*show_segment_separator=*/true,
+                           &preedit);
+    ASSERT_EQ(preedit.segment_size(), 5);
+    EXPECT_EQ(preedit.segment(0).value(), "今日");
+    EXPECT_EQ(preedit.segment(0).annotation(),
+              commands::Preedit::Segment::HIGHLIGHT);
+
+    EXPECT_EQ(preedit.segment(1).value(), "/");
+    EXPECT_EQ(preedit.segment(1).annotation(),
+              commands::Preedit::Segment::NONE);
+
+    EXPECT_EQ(preedit.segment(2).value(), "いい");
+    EXPECT_EQ(preedit.segment(2).annotation(),
+              commands::Preedit::Segment::UNDERLINE);
+
+    EXPECT_EQ(preedit.segment(3).value(), "/");
+    EXPECT_EQ(preedit.segment(3).annotation(),
+              commands::Preedit::Segment::NONE);
+
+    EXPECT_EQ(preedit.segment(4).value(), "天気です");
+    EXPECT_EQ(preedit.segment(4).annotation(),
+              commands::Preedit::Segment::UNDERLINE);
+
+    EXPECT_EQ(preedit.highlighted_position(), 0);
+    EXPECT_EQ(preedit.cursor(), 10);
+  }
+
+  // When show_segment_separator = true and focus on seg1 (index 1)
+  {
+    commands::Preedit preedit;
+    output::FillConversion(segments, 1, 0, /*show_segment_separator=*/true,
+                           &preedit);
+    ASSERT_EQ(preedit.segment_size(), 5);
+    EXPECT_EQ(preedit.segment(0).value(), "今日");
+    EXPECT_EQ(preedit.segment(0).annotation(),
+              commands::Preedit::Segment::UNDERLINE);
+
+    EXPECT_EQ(preedit.segment(1).value(), "/");
+    EXPECT_EQ(preedit.segment(1).annotation(),
+              commands::Preedit::Segment::NONE);
+
+    EXPECT_EQ(preedit.segment(2).value(), "いい");
+    EXPECT_EQ(preedit.segment(2).annotation(),
+              commands::Preedit::Segment::HIGHLIGHT);
+
+    EXPECT_EQ(preedit.segment(3).value(), "/");
+    EXPECT_EQ(preedit.segment(3).annotation(),
+              commands::Preedit::Segment::NONE);
+
+    EXPECT_EQ(preedit.segment(4).value(), "天気です");
+    EXPECT_EQ(preedit.segment(4).annotation(),
+              commands::Preedit::Segment::UNDERLINE);
+
+    // highlighted_position should point after "今日" (2 chars) + "/" (1 char) = 3
+    EXPECT_EQ(preedit.highlighted_position(), 3);
+    EXPECT_EQ(preedit.cursor(), 10);
+  }
+
+  // When show_segment_separator = false: standard behavior (no separators)
+  {
+    commands::Preedit preedit;
+    output::FillConversion(segments, 1, 0, /*show_segment_separator=*/false,
+                           &preedit);
+    ASSERT_EQ(preedit.segment_size(), 3);
+    EXPECT_EQ(preedit.segment(0).value(), "今日");
+    EXPECT_EQ(preedit.segment(1).value(), "いい");
+    EXPECT_EQ(preedit.segment(2).value(), "天気です");
+    EXPECT_EQ(preedit.highlighted_position(), 2);
+    EXPECT_EQ(preedit.cursor(), 8);
+  }
+}
+
 }  // namespace engine
 }  // namespace mozc
