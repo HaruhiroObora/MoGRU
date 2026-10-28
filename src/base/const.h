@@ -35,8 +35,8 @@ namespace mozc {
 inline constexpr char kProductNameInEnglish[] = "Google Japanese Input";
 #define kProductPrefix "GoogleJapaneseInput"
 #else  // GOOGLE_JAPANESE_INPUT_BUILD
-inline constexpr char kProductNameInEnglish[] = "Mozc";
-#define kProductPrefix "Mozc"
+inline constexpr char kProductNameInEnglish[] = "MoGRU";
+#define kProductPrefix "MoGRU"
 #endif  // GOOGLE_JAPANESE_INPUT_BUILD
 
 inline constexpr char kVersionRewriterVersionPrefix[] = kProductPrefix "-";
@@ -121,12 +121,12 @@ inline constexpr wchar_t kCompositionWindowClassName[] =
 inline constexpr wchar_t kIndicatorWindowClassName[] = L"MozcIndicatorWindow";
 inline constexpr wchar_t kInfolistWindowClassName[] = L"MozcInfolistWindow";
 inline constexpr wchar_t kIMEUIWndClassName[] = L"MozcUIWindow";
-inline constexpr char kIPCPrefix[] = "\\\\.\\pipe\\mozc.";
+inline constexpr char kIPCPrefix[] = "\\\\.\\pipe\\mogru.";
 inline constexpr wchar_t kCandidateUIDescription[] = L"MozcCandidateUI";
-inline constexpr wchar_t kConfigurationDisplayname[] = L"Mozc Configuration";
-inline constexpr wchar_t kMozcRegKey[] = L"Software\\Mozc Project\\Mozc";
+inline constexpr wchar_t kConfigurationDisplayname[] = L"MoGRU Configuration";
+inline constexpr wchar_t kMozcRegKey[] = L"Software\\MoGRU Project\\MoGRU";
 inline constexpr wchar_t kElevatedProcessDisabledKey[] =
-    L"Software\\Policies\\Mozc Project\\Mozc\\Preferences";
+    L"Software\\Policies\\MoGRU Project\\MoGRU\\Preferences";
 #endif  // GOOGLE_JAPANESE_INPUT_BUILD
 #elif defined(__APPLE__)
 inline constexpr char kMozcServerName[] = kProductPrefix "Converter.app";
@@ -135,12 +135,12 @@ inline constexpr char kMozcTool[] = kProductPrefix "Tool.app";
 #ifdef GOOGLE_JAPANESE_INPUT_BUILD
 inline constexpr char kEventPathPrefix[] = "GoogleJapaneseInput.event.";
 #else   // GOOGLE_JAPANESE_INPUT_BUILD
-inline constexpr char kEventPathPrefix[] = "Mozc.event.";
+inline constexpr char kEventPathPrefix[] = "MoGRU.event.";
 #endif  // GOOGLE_JAPANESE_INPUT_BUILD
 #else   // __linux__ including __ANDROID__
 inline constexpr char kMozcServerName[] = "mozc_server";
 inline constexpr char kMozcRenderer[] = "mozc_renderer";
-inline constexpr char kEventPathPrefix[] = "mozc.event.";
+inline constexpr char kEventPathPrefix[] = "mogru.event.";
 inline constexpr char kMozcTool[] = "mozc_tool";
 #endif  // _WIN32, __APPLE__, or else
 

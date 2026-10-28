@@ -86,13 +86,13 @@ namespace {
 #if defined(MOZC_SERVER_DIR)
 constexpr absl::string_view kMozcServerDir = MOZC_SERVER_DIR;
 #else  // MOZC_SERVER_DIR
-constexpr absl::string_view kMozcServerDir = "/usr/lib/mozc";
+constexpr absl::string_view kMozcServerDir = "/usr/lib/mogru";
 #endif  // MOZC_SERVER_DIR
 
 #if defined(MOZC_DOCUMENT_DIR)
 constexpr absl::string_view kMozcDocumentDir = MOZC_DOCUMENT_DIR;
 #else  // MOZC_DOCUMENT_DIR
-constexpr absl::string_view kMozcDocumentDir = "/usr/lib/mozc/documents";
+constexpr absl::string_view kMozcDocumentDir = "/usr/lib/mogru/documents";
 #endif  // MOZC_DOCUMENT_DIR
 
 class ProgramInvocationNameHolder final {
@@ -212,39 +212,40 @@ std::string UserProfileDirectoryImpl::GetUserProfileDirectory() const {
     ::mkdir(dir.c_str(), 0755);
     return FileUtil::JoinPath(dir, "JapaneseInput");
 #else   //  GOOGLE_JAPANESE_INPUT_BUILD
-    return FileUtil::JoinPath(dir, "Mozc");
+    return FileUtil::JoinPath(dir, "MoGRU");
 #endif  //  GOOGLE_JAPANESE_INPUT_BUILD
 
 #elif defined(__linux__)
-    // 1. If "$HOME/.mozc" already exists,
-    //    use "$HOME/.mozc" for backward compatibility.
+    // 1. If "$HOME/.mogru" already exists,
+    //    use "$HOME/.mogru" for backward compatibility.
     // 2. If $XDG_CONFIG_HOME is defined
-    //    use "$XDG_CONFIG_HOME/mozc".
+    //    use "$XDG_CONFIG_HOME/mogru".
     // 3. Otherwise
-    //    use "$HOME/.config/mozc" as the default value of $XDG_CONFIG_HOME
+    //    use "$HOME/.config/mogru" as the default value of $XDG_CONFIG_HOME
     // https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
-    const std::string home = Environ::GetEnv("HOME");
+    std::string home = Environ::GetEnv("HOME");
     if (home.empty()) {
       char buf[1024];
       struct passwd pw, *ppw;
       const uid_t uid = geteuid();
-      CHECK_EQ(0, getpwuid_r(uid, &pw, buf, sizeof(buf), &ppw))
-          << "Can't get passwd entry for uid " << uid << ".";
-      CHECK_LT(0, strlen(pw.pw_dir))
-          << "Home directory for uid " << uid << " is not set.";
-      return FileUtil::JoinPath(pw.pw_dir, ".mozc");
+      if (getpwuid_r(uid, &pw, buf, sizeof(buf), &ppw) == 0 && pw.pw_dir != nullptr && strlen(pw.pw_dir) > 0) {
+        home = pw.pw_dir;
+      }
+    }
+    if (home.empty()) {
+      return "/tmp/.mogru";
     }
 
-    std::string old_dir = FileUtil::JoinPath(home, ".mozc");
+    std::string old_dir = FileUtil::JoinPath(home, ".mogru");
     if (FileUtil::DirectoryExists(old_dir).ok()) {
       return old_dir;
     }
 
     const std::string xdg_config_home = Environ::GetEnv("XDG_CONFIG_HOME");
     if (!xdg_config_home.empty()) {
-      return FileUtil::JoinPath(xdg_config_home, "mozc");
+      return FileUtil::JoinPath(xdg_config_home, "mogru");
     }
-    return FileUtil::JoinPath(home, ".config/mozc");
+    return FileUtil::JoinPath(home, ".config/mogru");
 
 #else  // Supported platforms
     LOG(ERROR) << "Undefined target platform.";

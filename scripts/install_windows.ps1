@@ -145,8 +145,7 @@ $ChardataSrc = Join-Path $RepoRoot "models\chardata.bin"
 $ConfigSrc = Join-Path $RepoRoot "models\gru_config.ini"
 
 $TargetDirs = @(
-    (Join-Path $env:USERPROFILE "AppData\LocalLow\Mozc"),
-    (Join-Path $env:USERPROFILE "AppData\LocalLow\Google\JapaneseInput")
+    (Join-Path $env:USERPROFILE "AppData\LocalLow\MoGRU")
 )
 
 foreach ($ModelDestDir in $TargetDirs) {
@@ -173,6 +172,21 @@ foreach ($ModelDestDir in $TargetDirs) {
                 Copy-Item -Path $ConfigSrc -Destination $ConfigDest -Force
             }
         }
+    }
+}
+
+# 7. Clean up legacy MoGRU files from Mozc directories to remove pollution
+$LegacyDirs = @(
+    (Join-Path $env:USERPROFILE "AppData\LocalLow\Mozc"),
+    (Join-Path $env:USERPROFILE "AppData\LocalLow\Google\JapaneseInput")
+)
+foreach ($LegacyDir in $LegacyDirs) {
+    if (Test-Path $LegacyDir) {
+        Remove-Item -Path (Join-Path $LegacyDir "grumodel.bin") -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path (Join-Path $LegacyDir "chardata.bin") -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path (Join-Path $LegacyDir "gru_config.ini") -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path (Join-Path $LegacyDir "gru_config.ini.bak") -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path (Join-Path $LegacyDir "grumodel_user.bin") -Force -ErrorAction SilentlyContinue
     }
 }
 

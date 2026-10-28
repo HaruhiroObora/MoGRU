@@ -79,23 +79,19 @@ std::vector<std::string> GetCandidateProfileDirs() {
 
 #ifdef __linux__
   if (const char* home = std::getenv("HOME")) {
-    add_unique(FileUtil::JoinPath(home, ".config/mozc"));
-    add_unique(FileUtil::JoinPath(home, ".mozc"));
+    add_unique(FileUtil::JoinPath(home, ".config/mogru"));
+    add_unique(FileUtil::JoinPath(home, ".mogru"));
   }
   add_unique(SystemUtil::GetUserProfileDirectory());
 #else
   add_unique(SystemUtil::GetUserProfileDirectory());
   if (const char* home = std::getenv("HOME")) {
-    add_unique(FileUtil::JoinPath(home, "Library/Application Support/Mozc"));
-    add_unique(FileUtil::JoinPath(
-        home, "Library/Application Support/Google/JapaneseInput"));
-    add_unique(FileUtil::JoinPath(home, ".config/mozc"));
-    add_unique(FileUtil::JoinPath(home, ".mozc"));
+    add_unique(FileUtil::JoinPath(home, "Library/Application Support/MoGRU"));
+    add_unique(FileUtil::JoinPath(home, ".config/mogru"));
+    add_unique(FileUtil::JoinPath(home, ".mogru"));
   }
   if (const char* userprofile = std::getenv("USERPROFILE")) {
-    add_unique(FileUtil::JoinPath(userprofile, "AppData/LocalLow/Mozc"));
-    add_unique(FileUtil::JoinPath(
-        userprofile, "AppData/LocalLow/Google/JapaneseInput"));
+    add_unique(FileUtil::JoinPath(userprofile, "AppData/LocalLow/MoGRU"));
   }
 #endif
   return dirs;

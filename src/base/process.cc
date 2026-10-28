@@ -241,7 +241,7 @@ bool Process::SpawnMozcProcess(absl::string_view filename,
 #ifdef __linux__
   if (const char* home = std::getenv("HOME")) {
     const std::string local_path = FileUtil::JoinPath(
-        home, FileUtil::JoinPath(".local/lib/mozc", filename));
+        home, FileUtil::JoinPath(".local/lib/mogru", filename));
     if (FileUtil::FileExists(local_path).ok()) {
       return Process::SpawnProcess(local_path, arg, pid);
     }

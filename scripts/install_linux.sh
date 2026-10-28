@@ -187,15 +187,16 @@ fi
 echo "=== Installing MoGRU to ~/.local ==="
 mkdir -p "$HOME/.local/lib/fcitx5"
 mkdir -p "$HOME/.local/lib64/fcitx5"
-mkdir -p "$HOME/.local/lib/mozc"
+mkdir -p "$HOME/.local/lib/mogru"
 mkdir -p "$HOME/.local/share/fcitx5/addon"
 mkdir -p "$HOME/.local/share/fcitx5/inputmethod"
-mkdir -p "$HOME/.config/mozc"
+mkdir -p "$HOME/.config/mogru"
 
 if [ -n "$SOURCE_MOZC_TOOL" ] && [ -f "$SOURCE_MOZC_TOOL" ]; then
-  cp -f "$SOURCE_MOZC_TOOL" "$HOME/.local/lib/mozc/mozc_tool"
-  chmod 755 "$HOME/.local/lib/mozc/mozc_tool"
-  echo "[+] Installed MoGRU Qt GUI tool to $HOME/.local/lib/mozc/mozc_tool"
+  cp -f "$SOURCE_MOZC_TOOL" "$HOME/.local/lib/mogru/mozc_tool"
+  chmod 755 "$HOME/.local/lib/mogru/mozc_tool"
+  ln -sf "$HOME/.local/lib/mogru/mozc_tool" "$HOME/.local/lib/mogru/mogru_tool"
+  echo "[+] Installed MoGRU Qt GUI tool to $HOME/.local/lib/mogru/mozc_tool"
 fi
 
 # Clean up older mozc-gru references to prevent duplicates
@@ -203,6 +204,13 @@ rm -f "$HOME/.local/lib/fcitx5/fcitx5-mozc-gru.so"
 rm -f "$HOME/.local/lib64/fcitx5/fcitx5-mozc-gru.so"
 rm -f "$HOME/.local/share/fcitx5/addon/mozc-gru.conf"
 rm -f "$HOME/.local/share/fcitx5/inputmethod/mozc-gru.conf"
+
+# Clean up older MoGRU tool from ~/.local/lib/mozc/ if present
+if [ -f "$HOME/.local/lib/mozc/mozc_tool" ]; then
+  echo "[+] Cleaning up legacy MoGRU tool from ~/.local/lib/mozc/mozc_tool ..."
+  rm -f "$HOME/.local/lib/mozc/mozc_tool"
+  rmdir "$HOME/.local/lib/mozc" 2>/dev/null || true
+fi
 
 # Copy library (install to both lib and lib64 for multi-distro compatibility)
 rm -f "$HOME/.local/lib/fcitx5/fcitx5-mogru.so"
@@ -236,36 +244,58 @@ Addon=mogru
 Configurable=True
 EOF
 
-# 5. Copy GRU model weights and vocabulary to ~/.config/mozc/ and ~/.mozc/
+# 5. Migrate old MoGRU configuration and learned model from ~/.config/mozc if present
+if [ -d "$HOME/.config/mozc" ] || [ -d "$HOME/.mozc" ]; then
+  for legacy_dir in "$HOME/.config/mozc" "$HOME/.mozc"; do
+    if [ -d "$legacy_dir" ]; then
+      if [ -f "$legacy_dir/gru_config.ini" ] && [ ! -f "$HOME/.config/mogru/gru_config.ini" ]; then
+        echo "[+] Migrating existing gru_config.ini from $legacy_dir to ~/.config/mogru/ ..."
+        cp -p "$legacy_dir/gru_config.ini" "$HOME/.config/mogru/gru_config.ini"
+      fi
+      if [ -f "$legacy_dir/grumodel_user.bin" ] && [ ! -f "$HOME/.config/mogru/grumodel_user.bin" ]; then
+        echo "[+] Migrating existing grumodel_user.bin from $legacy_dir to ~/.config/mogru/ ..."
+        cp -p "$legacy_dir/grumodel_user.bin" "$HOME/.config/mogru/grumodel_user.bin"
+      fi
+    fi
+  done
+
+  # Clean up legacy MoGRU files from mozc directories to remove pollution
+  echo "[+] Cleaning up legacy MoGRU files from ~/.config/mozc/ and ~/.mozc/ ..."
+  for legacy_dir in "$HOME/.config/mozc" "$HOME/.mozc"; do
+    if [ -d "$legacy_dir" ]; then
+      rm -f "$legacy_dir/grumodel.bin"
+      rm -f "$legacy_dir/chardata.bin"
+      rm -f "$legacy_dir/gru_config.ini"
+      rm -f "$legacy_dir/gru_config.ini.bak"
+      rm -f "$legacy_dir/grumodel_user.bin"
+    fi
+  done
+fi
+
+# Copy GRU model weights and vocabulary to ~/.config/mogru/
 if [ -f "$REPO_ROOT/models/grumodel.bin" ] && [ -f "$REPO_ROOT/models/chardata.bin" ]; then
-  echo "[+] Copying default model files to ~/.config/mozc/ and ~/.mozc/ ..."
-  mkdir -p "$HOME/.mozc"
-  cp -f "$REPO_ROOT/models/grumodel.bin" "$HOME/.config/mozc/"
-  cp -f "$REPO_ROOT/models/chardata.bin" "$HOME/.config/mozc/"
-  cp -f "$REPO_ROOT/models/grumodel.bin" "$HOME/.mozc/"
-  cp -f "$REPO_ROOT/models/chardata.bin" "$HOME/.mozc/"
+  echo "[+] Copying default model files to ~/.config/mogru/ ..."
+  cp -f "$REPO_ROOT/models/grumodel.bin" "$HOME/.config/mogru/"
+  cp -f "$REPO_ROOT/models/chardata.bin" "$HOME/.config/mogru/"
 fi
 
 # Deploy default gru_config.ini if not already existing or upgrade legacy format
-for conf_dir in "$HOME/.config/mozc" "$HOME/.mozc"; do
-  mkdir -p "$conf_dir"
-  TARGET_INI="$conf_dir/gru_config.ini"
-  if [ ! -f "$TARGET_INI" ]; then
-    if [ -f "$REPO_ROOT/models/gru_config.ini" ]; then
-      echo "[+] Initializing $TARGET_INI from default template ..."
-      cp "$REPO_ROOT/models/gru_config.ini" "$TARGET_INI"
-    fi
-  else
-    # Check if existing ini is legacy format or lacks enable_live_conversion
-    if grep -q "katakana_penalty" "$TARGET_INI" || ! grep -q "enable_live_conversion" "$TARGET_INI"; then
-      echo "[+] Upgrading $TARGET_INI to unified MoGRU config format (backup saved to $TARGET_INI.bak) ..."
-      cp "$TARGET_INI" "$TARGET_INI.bak"
-      cp "$REPO_ROOT/models/gru_config.ini" "$TARGET_INI"
-    else
-      echo "[*] Preserving existing configuration: $TARGET_INI"
-    fi
+TARGET_INI="$HOME/.config/mogru/gru_config.ini"
+if [ ! -f "$TARGET_INI" ]; then
+  if [ -f "$REPO_ROOT/models/gru_config.ini" ]; then
+    echo "[+] Initializing $TARGET_INI from default template ..."
+    cp "$REPO_ROOT/models/gru_config.ini" "$TARGET_INI"
   fi
-done
+else
+  # Check if existing ini is legacy format or lacks enable_live_conversion
+  if grep -q "katakana_penalty" "$TARGET_INI" || ! grep -q "enable_live_conversion" "$TARGET_INI"; then
+    echo "[+] Upgrading $TARGET_INI to unified MoGRU config format (backup saved to $TARGET_INI.bak) ..."
+    cp "$TARGET_INI" "$TARGET_INI.bak"
+    cp "$REPO_ROOT/models/gru_config.ini" "$TARGET_INI"
+  else
+    echo "[*] Preserving existing configuration: $TARGET_INI"
+  fi
+fi
 
 # 6. Configure Fcitx5 directory
 mkdir -p "$HOME/.config/fcitx5/conf"
@@ -282,4 +312,4 @@ fi
 
 echo "=== Installation Complete! ==="
 echo "You can now add 'MoGRU' in Fcitx5 Configuration (fcitx5-config-qt)."
-echo "MoGRU settings can be customized via 'Configuration Tool' (mozc_tool) or ~/.config/mozc/gru_config.ini."
+echo "MoGRU settings can be customized via 'Configuration Tool' (mozc_tool) or ~/.config/mogru/gru_config.ini."

@@ -154,9 +154,8 @@ echo "=== Installing MoGRU ==="
 
 # Copy GRU model files and default configuration to user profile directory
 for dir in \
-  "$HOME/Library/Application Support/Mozc" \
-  "$HOME/Library/Application Support/Google/JapaneseInput" \
-  "$HOME/.config/mozc"; do
+  "$HOME/Library/Application Support/MoGRU" \
+  "$HOME/.config/mogru"; do
   mkdir -p "$dir"
   if [ -f "$REPO_ROOT/models/grumodel.bin" ] && [ -f "$REPO_ROOT/models/chardata.bin" ]; then
     cp -f "$REPO_ROOT/models/grumodel.bin" "$dir/"
@@ -172,7 +171,21 @@ for dir in \
     cp "$REPO_ROOT/models/gru_config.ini" "$TARGET_INI"
   fi
 done
-echo "[+] GRU model files and configuration installed to Application Support and ~/.config/mozc/"
+echo "[+] GRU model files and configuration installed to Application Support and ~/.config/mogru/"
+
+# Clean up legacy MoGRU files from Mozc directories to remove pollution
+for legacy_dir in \
+  "$HOME/Library/Application Support/Mozc" \
+  "$HOME/Library/Application Support/Google/JapaneseInput" \
+  "$HOME/.config/mozc"; do
+  if [ -d "$legacy_dir" ]; then
+    rm -f "$legacy_dir/grumodel.bin"
+    rm -f "$legacy_dir/chardata.bin"
+    rm -f "$legacy_dir/gru_config.ini"
+    rm -f "$legacy_dir/gru_config.ini.bak"
+    rm -f "$legacy_dir/grumodel_user.bin"
+  fi
+done
 
 # If Mozc.pkg exists, install it
 if [ -n "$SOURCE_PKG" ] && [ -e "$SOURCE_PKG" ]; then

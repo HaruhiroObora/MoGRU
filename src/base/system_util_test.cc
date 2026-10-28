@@ -60,35 +60,35 @@ TEST_F(SystemUtilTest, GetUserProfileDirectory) {
   FileUtilMock file_util_mock;
   SystemUtil::SetUserProfileDirectory("");
 
-  // The default path is "$HOME/.config/mozc".
-  EXPECT_FALSE(FileUtil::DirectoryExists("/home/mozcuser/.config/mozc").ok());
-  EXPECT_EQ("/home/mozcuser/.config/mozc",
+  // The default path is "$HOME/.config/mogru".
+  EXPECT_FALSE(FileUtil::DirectoryExists("/home/mozcuser/.config/mogru").ok());
+  EXPECT_EQ("/home/mozcuser/.config/mogru",
             SystemUtil::GetUserProfileDirectory());
-  EXPECT_OK(FileUtil::DirectoryExists("/home/mozcuser/.config/mozc"));
+  EXPECT_OK(FileUtil::DirectoryExists("/home/mozcuser/.config/mogru"));
 
   environ_mock.SetEnv("XDG_CONFIG_HOME", "/tmp/config");
 
   // Once the dir is initialized, the value is not changed.
-  EXPECT_EQ("/home/mozcuser/.config/mozc",
+  EXPECT_EQ("/home/mozcuser/.config/mogru",
             SystemUtil::GetUserProfileDirectory());
 
   // Resets the cache by setting an empty string.
   SystemUtil::SetUserProfileDirectory("");
 
   // $XDG_CONFIG_HOME is already set with "/tmp/config" in above.
-  // If $XDG_CONFIG_HOME is specified, "$XDG_CONFIG_HOME/mozc" is used.
-  EXPECT_FALSE(FileUtil::DirectoryExists("/tmp/config/mozc").ok());
-  EXPECT_EQ("/tmp/config/mozc", SystemUtil::GetUserProfileDirectory());
-  EXPECT_OK(FileUtil::DirectoryExists("/tmp/config/mozc"));
+  // If $XDG_CONFIG_HOME is specified, "$XDG_CONFIG_HOME/mogru" is used.
+  EXPECT_FALSE(FileUtil::DirectoryExists("/tmp/config/mogru").ok());
+  EXPECT_EQ("/tmp/config/mogru", SystemUtil::GetUserProfileDirectory());
+  EXPECT_OK(FileUtil::DirectoryExists("/tmp/config/mogru"));
 
   // Resets again.
   SystemUtil::SetUserProfileDirectory("");
 
-  // If "$HOME/.mozc" exists, it is used for backward compatibility.
-  EXPECT_OK(FileUtil::CreateDirectory("/home/mozcuser/.mozc"));
-  EXPECT_OK(FileUtil::DirectoryExists("/home/mozcuser/.mozc"));
-  EXPECT_EQ("/home/mozcuser/.mozc", SystemUtil::GetUserProfileDirectory());
-  EXPECT_OK(FileUtil::DirectoryExists("/home/mozcuser/.mozc"));
+  // If "$HOME/.mogru" exists, it is used for backward compatibility.
+  EXPECT_OK(FileUtil::CreateDirectory("/home/mozcuser/.mogru"));
+  EXPECT_OK(FileUtil::DirectoryExists("/home/mozcuser/.mogru"));
+  EXPECT_EQ("/home/mozcuser/.mogru", SystemUtil::GetUserProfileDirectory());
+  EXPECT_OK(FileUtil::DirectoryExists("/home/mozcuser/.mogru"));
 
   // Resets again to avoid side effects to other tests.
   SystemUtil::SetUserProfileDirectory("");

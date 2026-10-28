@@ -79,11 +79,11 @@ ABSL_FLAG(double, gru_hiragana_length_power, 1.0,
 ABSL_FLAG(std::string, gru_model_path, "",
           "Path to GRU model file. If empty, uses default path.");
 ABSL_FLAG(std::string, gru_user_model_path, "",
-          "Path to user-adapted GRU model file. If empty, uses ~/.config/mozc/grumodel_user.bin");
+          "Path to user-adapted GRU model file. If empty, uses ~/.config/mogru/grumodel_user.bin");
 ABSL_FLAG(std::string, gru_chardata_path, "",
           "Path to CharIndex data file. If empty, uses default path.");
 ABSL_FLAG(std::string, gru_config_path, "",
-          "Path to gru_config.ini. If empty, uses ~/.config/mozc/gru_config.ini");
+          "Path to gru_config.ini. If empty, uses ~/.config/mogru/gru_config.ini");
 
 namespace mozc {
 namespace {

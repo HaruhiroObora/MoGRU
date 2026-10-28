@@ -21,8 +21,11 @@ msgstr ""
 "Plural-Forms: nplurals=1; plural=0;\n"
 
 #: mozc_engine.h:94 mozc_engine.cc:198
+msgid "About MoGRU"
+msgstr "MoGRU について"
+
 msgid "About Mozc"
-msgstr "Mozc について"
+msgstr "MoGRU について"
 
 #: mozc_engine.h:92 mozc_engine.cc:191
 msgid "Add Word"
@@ -98,15 +101,21 @@ msgstr "初期モード"
 
 #: org.fcitx.Fcitx5.Addon.Mozc.metainfo.xml.in:8
 msgid "Japanese input method based on Mozc"
-msgstr "Mozc をベースとした日本語入力メソッド"
+msgstr "MoGRU 日本語入力メソッド"
 
 #: mozc_engine.cc:147 mozc_engine.cc:148
+msgid "MoGRU Settings"
+msgstr "MoGRU の設定"
+
 msgid "Mozc Settings"
-msgstr "Mozc の設定"
+msgstr "MoGRU の設定"
 
 #: org.fcitx.Fcitx5.Addon.Mozc.metainfo.xml.in:7
+msgid "MoGRU for Fcitx 5"
+msgstr "Fcitx 5 用の MoGRU"
+
 msgid "Mozc for Fcitx 5"
-msgstr "Fcitx 5 用の Mozc"
+msgstr "Fcitx 5 用の MoGRU"
 
 #: mozc_engine.h:53
 msgid "No"

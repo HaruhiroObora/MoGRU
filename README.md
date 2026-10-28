@@ -6,7 +6,7 @@
 ### 主な特徴
 - **macOSライクなライブ変換**: 入力と同時にリアルタイムでインライン自動変換。スペースキーを押す手間なく、流れるようなタイピング体験を実現。
 - **大域的ビームサーチ ($B=8$)**: 複数文節を跨いだ文脈をGRUニューラル言語モデルで評価し、文脈に応じた適切な同音異義語を自動リランキング。
-- **インプロセス・オンライン継続学習**: 変換確定履歴からリアルタイム（1ms未満）にGRU言語モデルを自動微調整。ユーザー固有の言い回しや選好に即座に適応し、`~/.config/mozc/grumodel_user.bin` へ自動永続化。
+- **インプロセス・オンライン継続学習**: 変換確定履歴からリアルタイム（1ms未満）にGRU言語モデルを自動微調整。ユーザー固有の言い回しや選好に即座に適応し、`~/.config/mogru/grumodel_user.bin` へ自動永続化。
 - **独立動作（共存対応）**: システム標準の `mozc` と競合せず、Fcitx5 上で `MoGRU` として独立して登録・利用可能。
 - **GUI設定対応**: Fcitx5 設定画面からライブ変換のON/OFF、モデルパス、文脈重み係数 $\alpha$（デフォルト 800）をリアルタイムに調整可能。
 - **マルチプラットフォーム**: Linux (Fcitx5), macOS, Windows をサポート。
@@ -37,11 +37,11 @@ macOS 標準日本語入力でおなじみの「**ライブ変換**」を MoGRU 
 - **忘却防止（L2 アンカー正則化）**:
   更新時にベースモデル（`grumodel.bin`）からの乖離を抑える正則化項 $\lambda (W - W_{\text{base}})$ を適用。使い続けても一般的な日本語の基礎的な文脈理解を崩すことなく、個人の表現や選好のみに自然に適応します。
 - **ベースモデルを汚さない安全なユーザー重み管理**:
-  オリジナルのベースモデル（`grumodel.bin`）はそのまま保持し、学習済みモデルは `~/.config/mozc/grumodel_user.bin` へアトミックに自動保存・再読み込みされます。
+  オリジナルのベースモデル（`grumodel.bin`）はそのまま保持し、学習済みモデルは `~/.config/mogru/grumodel_user.bin` へアトミックに自動保存・再読み込みされます。
 - **ベースモデル切り替え時の自動保護（フィンガープリント照合）**:
   Fcitx5 設定画面などから別のベースモデルに切り替えた場合、モデルヘッダ内の 64bit ハッシュ値を照合。異なるベースモデルに由来する過去のユーザー重みが新しいベースモデルを誤って上書きすることを自動防止し、常に安全に意図通りの挙動を維持します。
 - **柔軟な設定カスタマイズ（ホットリロード対応）**:
-  `~/.config/mozc/gru_config.ini` を編集・保存するだけで、再起動なしで学習の挙動を即座に調整できます：
+  `~/.config/mogru/gru_config.ini` を編集・保存するだけで、再起動なしで学習の挙動を即座に調整できます：
   ```ini
   # オンライン学習の有効化
   enable_online_learning = true
@@ -124,46 +124,19 @@ Build Status
 |:-----:|:-------:|:-----:|
 | [![Linux](https://github.com/lambda-haru/MoGRU/actions/workflows/linux.yaml/badge.svg)](https://github.com/lambda-haru/MoGRU/actions/workflows/linux.yaml) | [![Windows](https://github.com/lambda-haru/MoGRU/actions/workflows/windows.yaml/badge.svg)](https://github.com/lambda-haru/MoGRU/actions/workflows/windows.yaml) | [![macOS](https://github.com/lambda-haru/MoGRU/actions/workflows/macos.yaml/badge.svg)](https://github.com/lambda-haru/MoGRU/actions/workflows/macos.yaml) |
 
+---
 
-What's Mozc?
-------------
-For historical reasons, the project name *Mozc* has two different meanings:
+## ベースプロジェクト（Mozc）について
 
-1. Internal code name of Google Japanese Input that is still commonly used
-   inside Google.
-2. Project name to release a subset of Google Japanese Input in the form of
-   source code under OSS license without any warranty nor user support.
+MoGRU は、Google が開発・公開しているオープンソースの日本語入力システム [Mozc](https://github.com/google/mozc) をベースに、文字単位 GRU ニューラル言語モデル（GRU Scorer）およびリアルタイムライブ変換機能等を統合・拡張したプロジェクトです。
 
-In this repository, *Mozc* means the second definition unless otherwise noted.
+Mozc 本来のコア変換エンジン設計、基本辞書構造、語彙選定方針、オリジナル版の仕様や詳細な技術ドキュメントについては、公式の Mozc リポジトリを参照してください。
 
-Detailed differences between Google Japanese Input and Mozc are described in [About Branding](docs/about_branding.md).
+- **Mozc 公式リポジトリ**: [https://github.com/google/mozc](https://github.com/google/mozc)
+- **語彙選定ポリシー**: [VOCABULARY_POLICY.md](VOCABULARY_POLICY.md)
+- **商標・ブランディングについて**: [About Branding](docs/about_branding.md)
 
-For policies on vocabulary and conversion results, see
-[Vocabulary Policy](VOCABULARY_POLICY.md).
-
-Build Instructions
-------------------
-
-* [How to build Mozc for Android](docs/build_mozc_for_android.md): for Android library (`libmozc.so`)
-* [How to build Mozc for Linux](docs/build_mozc_for_linux.md): for Linux desktop
-* [How to build Mozc for macOS](docs/build_mozc_in_osx.md): for macOS build
-* [How to build Mozc for Windows](docs/build_mozc_in_windows.md): for Windows
-
-Release Plan
-------------
-
-tl;dr. **There is no stable version.**
-
-As described in [About Branding](docs/about_branding.md) page, Google does
-not promise any official QA for OSS Mozc project.  Because of this,
-Mozc does not have a concept of *Stable Release*.  Instead we change version
-number every time when we introduce non-trivial change.  If you are
-interested in packaging Mozc source code, or developing your own products
-based on Mozc, feel free to pick up any version.  They should be equally
-stable (or equally unstable) in terms of no official QA process.
-
-[Release History](docs/release_history.md) page may have additional
-information and useful links about recent changes.
+---
 
 License
 -------

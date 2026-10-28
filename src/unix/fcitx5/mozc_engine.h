@@ -76,7 +76,7 @@ FCITX_CONFIGURATION(
     static std::string ResolveToolPath() {
       if (const char* home = std::getenv("HOME")) {
         const std::string local_tool =
-            mozc::FileUtil::JoinPath(home, ".local/lib/mozc/mozc_tool");
+            mozc::FileUtil::JoinPath(home, ".local/lib/mogru/mozc_tool");
         if (mozc::FileUtil::FileExists(local_tool).ok()) {
           return local_tool;
         }
@@ -114,7 +114,7 @@ FCITX_CONFIGURATION(
                             toolCommand("--mode=dictionary_tool")};
     ExternalOption addTool{this, "Add Word", _("Add Word"),
                            toolCommand("--mode=word_register_dialog")};
-    ExternalOption aboutTool{this, "About Mozc", _("About Mozc"),
+    ExternalOption aboutTool{this, "About MoGRU", _("About MoGRU"),
                              toolCommand("--mode=about_dialog")};);
 
 class MozcModeSubAction : public SimpleAction {

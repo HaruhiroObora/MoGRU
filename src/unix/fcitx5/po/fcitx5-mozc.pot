@@ -16,7 +16,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 
 #: mozc_engine.h:94 mozc_engine.cc:198
-msgid "About Mozc"
+msgid "About MoGRU"
 msgstr ""
 
 #: mozc_engine.h:92 mozc_engine.cc:191
