@@ -107,9 +107,9 @@ TEST_F(VersionRewriterTest, MobileEnvironmentTest) {
 TEST_F(VersionRewriterTest, RewriteTestVersion) {
 #ifdef GOOGLE_JAPANESE_INPUT_BUILD
   constexpr absl::string_view kVersionPrefixExpected = "GoogleJapaneseInput-";
-  constexpr absl::string_view kVersionPrefixUnexpected = "Mozc-";
+  constexpr absl::string_view kVersionPrefixUnexpected = "MoGRU-";
 #else   // GOOGLE_JAPANESE_INPUT_BUILD
-  constexpr absl::string_view kVersionPrefixExpected = "Mozc-";
+  constexpr absl::string_view kVersionPrefixExpected = "MoGRU-";
   constexpr absl::string_view kVersionPrefixUnexpected = "GoogleJapaneseInput-";
 #endif  // GOOGLE_JAPANESE_INPUT_BUILD
 
@@ -125,6 +125,10 @@ TEST_F(VersionRewriterTest, RewriteTestVersion) {
         kVersionPrefixExpected, segments));
     EXPECT_FALSE(VersionRewriterTest::FindCandidateWithPrefix(
         kVersionPrefixUnexpected, segments));
+#ifndef GOOGLE_JAPANESE_INPUT_BUILD
+    EXPECT_FALSE(VersionRewriterTest::FindCandidateWithPrefix(
+        "Mozc-", segments));
+#endif
   }
   {
     Segments segments;
@@ -135,6 +139,10 @@ TEST_F(VersionRewriterTest, RewriteTestVersion) {
         kVersionPrefixExpected, segments));
     EXPECT_FALSE(VersionRewriterTest::FindCandidateWithPrefix(
         kVersionPrefixUnexpected, segments));
+#ifndef GOOGLE_JAPANESE_INPUT_BUILD
+    EXPECT_FALSE(VersionRewriterTest::FindCandidateWithPrefix(
+        "Mozc-", segments));
+#endif
   }
 }
 
