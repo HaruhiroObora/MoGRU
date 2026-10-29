@@ -98,7 +98,17 @@ else
     exit 1
   fi
 
-  # 3. Check CMake (required to build Qt)
+  # 3. Check Python 3 & CMake (required to build Qt)
+  if ! command -v python3 &>/dev/null; then
+    if command -v brew &>/dev/null; then
+      echo "[!] Installing python3 via Homebrew..."
+      brew install python3
+    else
+      echo "[Error] python3 not found. Please install Python 3."
+      exit 1
+    fi
+  fi
+
   if ! command -v cmake &>/dev/null; then
     if command -v brew &>/dev/null; then
       echo "[!] Installing CMake via Homebrew..."

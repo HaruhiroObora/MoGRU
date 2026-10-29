@@ -77,6 +77,9 @@ cd MoGRU
 ./install.sh
 # または: ./scripts/install_linux.sh
 ```
+> [!NOTE]
+> ソースからビルドする場合、Fcitx5 開発ヘッダーおよび GUI 設定ツール用の Qt6（`qt6-base-dev` 等）が必要ですが、未インストールの場合はスクリプト初回実行時に自動でインストール案内が表示されます。
+
 > [!TIP]
 > **CIビルド生成物（Artifacts）を利用する場合（Bazel不要・数秒で完了）**:
 > GitHub Actions の `CI for Linux` の実行画面（Artifacts）から `fcitx5-mogru.so` をダウンロード・展開し、引数に指定して実行できます：

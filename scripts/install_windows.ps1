@@ -104,8 +104,23 @@ try {
             }
         }
 
-        # 4. Build Mozc Installer for Windows
-        Write-Host "=== Building Mozc Installer (-c opt) ===" -ForegroundColor Cyan
+        # 4. Check Python (required to build Qt & update dependencies)
+        if (-not (Get-Command "python" -ErrorAction SilentlyContinue)) {
+            Write-Error "Python 3 is required to prepare dependencies and build Qt. Please install Python and add it to PATH."
+            exit 1
+        }
+
+        # 5. Build Qt if not already present
+        if (-not (Test-Path "$RepoRoot\src\third_party\qt")) {
+            Write-Host "=== Step 1/2: Downloading dependencies & Building Qt for Windows ===" -ForegroundColor Cyan
+            Write-Host "Note: Building Qt may take several minutes on the first run." -ForegroundColor Yellow
+            Set-Location -Path "$RepoRoot\src"
+            & python build_tools\update_deps.py
+            & python build_tools\build_qt.py --release --confirm_license
+        }
+
+        # 6. Build Mozc Installer for Windows
+        Write-Host "=== Step 2/2: Building Mozc Installer (-c opt) ===" -ForegroundColor Cyan
         Set-Location -Path "$RepoRoot\src"
 
         # Execute Bazel build

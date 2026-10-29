@@ -89,7 +89,7 @@ else
   echo "[+] Using Bazel: $("$BAZEL_BIN" --version 2>/dev/null || echo "$BAZEL_BIN")"
 fi
 
-# 2. Check Fcitx5 development headers / runtime packages
+# 2. Check Fcitx5 development headers / runtime packages and Qt
 if [ -z "$PREBUILT_SO" ]; then
   if command -v apt-get &>/dev/null; then
     MISSING_PKGS=()
@@ -98,6 +98,10 @@ if [ -z "$PREBUILT_SO" ]; then
         MISSING_PKGS+=("$pkg")
       fi
     done
+    # Check Qt (Qt6 preferred, fallback to Qt5) for mozc_tool GUI config dialog
+    if ! dpkg -s qt6-base-dev &>/dev/null && ! dpkg -s qtbase5-dev &>/dev/null; then
+      MISSING_PKGS+=("qt6-base-dev")
+    fi
     if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
       echo "[!] Missing required packages: ${MISSING_PKGS[*]}"
       echo "    Please install them with: sudo apt install -y ${MISSING_PKGS[*]}"
@@ -113,6 +117,9 @@ if [ -z "$PREBUILT_SO" ]; then
         MISSING_PKGS+=("$pkg")
       fi
     done
+    if ! rpm -q qt6-qtbase-devel &>/dev/null && ! rpm -q qt5-qtbase-devel &>/dev/null; then
+      MISSING_PKGS+=("qt6-qtbase-devel")
+    fi
     if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
       echo "[!] Missing required RedHat/Fedora packages: ${MISSING_PKGS[*]}"
       echo "    Please install them with: sudo dnf install -y ${MISSING_PKGS[*]}"
@@ -128,6 +135,9 @@ if [ -z "$PREBUILT_SO" ]; then
         MISSING_PKGS+=("$pkg")
       fi
     done
+    if ! rpm -q qt6-qtbase-devel &>/dev/null && ! rpm -q qt5-qtbase-devel &>/dev/null; then
+      MISSING_PKGS+=("qt6-qtbase-devel")
+    fi
     if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
       echo "[!] Missing required RedHat/CentOS packages: ${MISSING_PKGS[*]}"
       echo "    Please install them with: sudo yum install -y ${MISSING_PKGS[*]}"
@@ -143,6 +153,9 @@ if [ -z "$PREBUILT_SO" ]; then
         MISSING_PKGS+=("$pkg")
       fi
     done
+    if ! pacman -Q qt6-base &>/dev/null && ! pacman -Q qt5-base &>/dev/null; then
+      MISSING_PKGS+=("qt6-base")
+    fi
     if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
       echo "[!] Missing required Arch packages: ${MISSING_PKGS[*]}"
       echo "    Please install them with: sudo pacman -S --needed ${MISSING_PKGS[*]}"
@@ -174,10 +187,18 @@ if [ -z "$PREBUILT_SO" ]; then
   cd "$REPO_ROOT/src"
   "$BAZEL_BIN" build -c opt //unix/fcitx5:fcitx5-mogru.so --//unix/fcitx5:use_server=False
   SOURCE_SO="$REPO_ROOT/src/bazel-bin/unix/fcitx5/fcitx5-mogru.so"
-  if "$BAZEL_BIN" build -c opt //gui/tool:mozc_tool --//unix/fcitx5:use_server=False; then
-    SOURCE_MOZC_TOOL="$REPO_ROOT/src/bazel-bin/gui/tool/mozc_tool"
+
+  # Build mozc_tool only if Qt headers are available, avoiding loud Bazel repository fetch errors
+  if pkg-config --exists Qt6Core Qt6Gui Qt6Widgets 2>/dev/null || pkg-config --exists Qt5Core Qt5Gui Qt5Widgets 2>/dev/null; then
+    echo "=== Building mozc_tool GUI Config Dialog (-c opt) ==="
+    if "$BAZEL_BIN" build -c opt //gui/tool:mozc_tool --//unix/fcitx5:use_server=False; then
+      SOURCE_MOZC_TOOL="$REPO_ROOT/src/bazel-bin/gui/tool/mozc_tool"
+    else
+      echo "[*] Optional //gui/tool:mozc_tool build failed."
+    fi
   else
-    echo "[*] Optional //gui/tool:mozc_tool build skipped (Qt development tools not found)."
+    echo "[*] Qt development libraries (Qt6/Qt5) not found. Skipping optional //gui/tool:mozc_tool build."
+    echo "    (Note: fcitx5-mogru.so was built successfully. Install qt6-base-dev if you want the GUI config dialog.)"
   fi
 else
   SOURCE_SO="$PREBUILT_SO"
