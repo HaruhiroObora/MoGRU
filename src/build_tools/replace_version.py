@@ -61,9 +61,9 @@ def ParseOptions():
 def GetBrandingName(version, branding):
   """Returns the branding name dictionary."""
   branding_name = {
-      'APP_NAME_JA': 'Mozc',
-      'APP_NAME_EN': 'Mozc',
-      'BRANDING': 'Mozc',
+      'APP_NAME_JA': branding if branding in ('Mozc', 'MoGRU') else 'Mozc',
+      'APP_NAME_EN': branding if branding in ('Mozc', 'MoGRU') else 'Mozc',
+      'BRANDING': branding,
       'DEV_CHANNEL': 'false',
       'OFFICIAL_BUILD': 'false',
   }

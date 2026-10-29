@@ -79,6 +79,7 @@ class ForwarderInfo:
   def forwarder_dll_name(self) -> str:
     return {
         'Mozc': 'mozc_tip64x.dll',
+        'MoGRU': 'mozc_tip64x.dll',
         'GoogleJapaneseInput': 'GoogleIMEJaTIP64X.dll',
     }[self.branding]
 
@@ -86,6 +87,7 @@ class ForwarderInfo:
   def x64_impl_dll_name(self) -> str:
     return {
         'Mozc': 'mozc_tip64.dll',
+        'MoGRU': 'mozc_tip64.dll',
         'GoogleJapaneseInput': 'GoogleIMEJaTIP64.dll',
     }[self.branding]
 
@@ -93,6 +95,7 @@ class ForwarderInfo:
   def arm64_impl_dll_name(self) -> str:
     return {
         'Mozc': 'mozc_tip64arm.dll',
+        'MoGRU': 'mozc_tip64arm.dll',
         'GoogleJapaneseInput': 'GoogleIMEJaTIP64Arm.dll',
     }[self.branding]
 
@@ -100,6 +103,7 @@ class ForwarderInfo:
   def file_description(self) -> str:
     return {
         'Mozc': 'Mozc TIP Module Forwarder',
+        'MoGRU': 'MoGRU TIP Module Forwarder',
         'GoogleJapaneseInput': 'Google 日本語入力 TIP モジュール フォワーダー',
     }[self.branding]
 
@@ -107,6 +111,7 @@ class ForwarderInfo:
   def product_name(self) -> str:
     return {
         'Mozc': 'Mozc',
+        'MoGRU': 'MoGRU',
         'GoogleJapaneseInput': 'Google 日本語入力',
     }[self.branding]
 
@@ -337,7 +342,7 @@ def parse_args() -> argparse.Namespace:
       '--branding',
       dest='branding',
       default='Mozc',
-      choices=['Mozc', 'GoogleJapaneseInput'],
+      choices=['Mozc', 'MoGRU', 'GoogleJapaneseInput'],
       help='branding',
   )
   parser.add_argument(
