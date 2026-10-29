@@ -207,6 +207,13 @@ foreach ($ModelDestDir in $TargetDirs) {
         Write-Host "[+] Copying GRU models to $ModelDestDir ..." -ForegroundColor Green
         Copy-Item -Path $ModelSrc -Destination $ModelDestDir -Force
         Copy-Item -Path $ChardataSrc -Destination $ModelDestDir -Force
+        $NewModelSrc = Join-Path (Split-Path $ModelSrc) "grumodel_new.bin"
+        $NewChardataSrc = Join-Path (Split-Path $ChardataSrc) "chardata_new.bin"
+        if ((Test-Path $NewModelSrc) -and (Test-Path $NewChardataSrc)) {
+            Write-Host "[+] Copying high-accuracy (H=256) models to $ModelDestDir ..." -ForegroundColor Green
+            Copy-Item -Path $NewModelSrc -Destination $ModelDestDir -Force
+            Copy-Item -Path $NewChardataSrc -Destination $ModelDestDir -Force
+        }
     }
 
     $ConfigDest = Join-Path $ModelDestDir "gru_config.ini"

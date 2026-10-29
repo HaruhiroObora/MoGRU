@@ -61,9 +61,8 @@ jobs:
           cp -f src/bazel-bin/gui/tool/mozc_tool package_linux/
 
           # モデルファイル
-          cp -f models/grumodel.bin package_linux/models/ 2>/dev/null || true
-          cp -f models/chardata.bin package_linux/models/ 2>/dev/null || true
-          cp -f models/gru_config.ini package_linux/models/ 2>/dev/null || true
+          cp -f models/*.bin package_linux/models/ 2>/dev/null || true
+          cp -f models/*.ini package_linux/models/ 2>/dev/null || true
 
           # アイコンアセット（128x128）
           cp -f src/data/images/product_icon_32bpp-128.png package_linux/icons/hicolor/128x128/apps/fcitx_mozc.png

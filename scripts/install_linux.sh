@@ -478,6 +478,11 @@ if [ -n "$SOURCE_MODELS_DIR" ]; then
   echo "[+] Copying default model files to ~/.config/mogru/ from $SOURCE_MODELS_DIR ..."
   cp -f "$SOURCE_MODELS_DIR/grumodel.bin" "$HOME/.config/mogru/"
   cp -f "$SOURCE_MODELS_DIR/chardata.bin" "$HOME/.config/mogru/"
+  if [ -f "$SOURCE_MODELS_DIR/grumodel_new.bin" ] && [ -f "$SOURCE_MODELS_DIR/chardata_new.bin" ]; then
+    echo "[+] Copying high-accuracy ($H=256$) model files to ~/.config/mogru/ ..."
+    cp -f "$SOURCE_MODELS_DIR/grumodel_new.bin" "$HOME/.config/mogru/"
+    cp -f "$SOURCE_MODELS_DIR/chardata_new.bin" "$HOME/.config/mogru/"
+  fi
 fi
 
 # Deploy default gru_config.ini if not already existing or upgrade legacy format

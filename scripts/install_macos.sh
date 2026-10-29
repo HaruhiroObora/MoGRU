@@ -193,6 +193,10 @@ for dir in \
   if [ -n "$SOURCE_MODELS_DIR" ]; then
     cp -f "$SOURCE_MODELS_DIR/grumodel.bin" "$dir/"
     cp -f "$SOURCE_MODELS_DIR/chardata.bin" "$dir/"
+    if [ -f "$SOURCE_MODELS_DIR/grumodel_new.bin" ] && [ -f "$SOURCE_MODELS_DIR/chardata_new.bin" ]; then
+      cp -f "$SOURCE_MODELS_DIR/grumodel_new.bin" "$dir/"
+      cp -f "$SOURCE_MODELS_DIR/chardata_new.bin" "$dir/"
+    fi
   fi
   TARGET_INI="$dir/gru_config.ini"
   if [ ! -f "$TARGET_INI" ] && [ -n "$SOURCE_MODELS_DIR" ] && [ -f "$SOURCE_MODELS_DIR/gru_config.ini" ]; then

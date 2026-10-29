@@ -65,9 +65,8 @@ jobs:
           New-Item -ItemType Directory -Path package_win\models -Force | Out-Null
           Copy-Item src\bazel-bin\win32\installer\*.msi package_win\ -Force
           Copy-Item scripts\install_windows.ps1 package_win\install.ps1 -Force
-          Copy-Item models\grumodel.bin package_win\models\ -Force -ErrorAction SilentlyContinue
-          Copy-Item models\chardata.bin package_win\models\ -Force -ErrorAction SilentlyContinue
-          Copy-Item models\gru_config.ini package_win\models\ -Force -ErrorAction SilentlyContinue
+          Copy-Item models\*.bin package_win\models\ -Force -ErrorAction SilentlyContinue
+          Copy-Item models\*.ini package_win\models\ -Force -ErrorAction SilentlyContinue
 
       - name: upload MoGRU-windows-x64.zip
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
