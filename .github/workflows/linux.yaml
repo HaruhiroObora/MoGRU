@@ -100,15 +100,12 @@ jobs:
           cp -f scripts/install_linux.sh package_linux/install.sh
           chmod 755 package_linux/install.sh
 
-          # zip アーカイブ作成
-          cd package_linux && zip -r ../MoGRU-linux.zip .
-
       - name: Upload MoGRU Linux Artifact
         if: github.event_name == 'push'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: MoGRU-linux.zip
-          path: MoGRU-linux.zip
+          name: MoGRU-linux
+          path: package_linux/
           if-no-files-found: warn
 
       - name: Upload fcitx5-mogru Artifact

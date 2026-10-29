@@ -56,13 +56,12 @@ jobs:
           cp -f models/grumodel.bin package_mac/models/ 2>/dev/null || true
           cp -f models/chardata.bin package_mac/models/ 2>/dev/null || true
           cp -f models/gru_config.ini package_mac/models/ 2>/dev/null || true
-          cd package_mac && zip -r ../MoGRU-macOS-arm64.zip .
 
       - name: upload MoGRU-macOS-arm64.zip
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: MoGRU-macOS-arm64.zip
-          path: MoGRU-macOS-arm64.zip
+          name: MoGRU-macOS-arm64
+          path: package_mac/
           if-no-files-found: warn
 
       - name: upload artifacts
@@ -115,13 +114,12 @@ jobs:
           cp -f models/grumodel.bin package_mac_x86/models/ 2>/dev/null || true
           cp -f models/chardata.bin package_mac_x86/models/ 2>/dev/null || true
           cp -f models/gru_config.ini package_mac_x86/models/ 2>/dev/null || true
-          cd package_mac_x86 && zip -r ../MoGRU-macOS-intel64.zip .
 
       - name: upload MoGRU-macOS-intel64.zip
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: MoGRU-macOS-intel64.zip
-          path: MoGRU-macOS-intel64.zip
+          name: MoGRU-macOS-intel64
+          path: package_mac_x86/
           if-no-files-found: warn
 
       - name: upload artifacts

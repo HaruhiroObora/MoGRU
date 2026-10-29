@@ -68,13 +68,12 @@ jobs:
           Copy-Item models\grumodel.bin package_win\models\ -Force -ErrorAction SilentlyContinue
           Copy-Item models\chardata.bin package_win\models\ -Force -ErrorAction SilentlyContinue
           Copy-Item models\gru_config.ini package_win\models\ -Force -ErrorAction SilentlyContinue
-          Compress-Archive -Path package_win\* -DestinationPath MoGRU-windows-x64.zip -Force
 
       - name: upload MoGRU-windows-x64.zip
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: MoGRU-windows-x64.zip
-          path: MoGRU-windows-x64.zip
+          name: MoGRU-windows-x64
+          path: package_win/
           if-no-files-found: warn
 
       - name: upload MoGRU64_x64.msi
