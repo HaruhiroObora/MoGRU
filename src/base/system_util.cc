@@ -331,7 +331,17 @@ std::string SystemUtil::GetServerDirectory() {
       FileUtil::JoinPath(program_files.value_or(""), kCompanyNameInEnglish),
       kProductNameInEnglish);
 #else   // GOOGLE_JAPANESE_INPUT_BUILD
-  return FileUtil::JoinPath(program_files.value_or(""), kProductNameInEnglish);
+  const std::string default_dir =
+      FileUtil::JoinPath(program_files.value_or(""), kProductNameInEnglish);
+  if (FileUtil::DirectoryExists(default_dir).ok()) {
+    return default_dir;
+  }
+  const std::string legacy_dir =
+      FileUtil::JoinPath(program_files.value_or(""), "Mozc");
+  if (FileUtil::DirectoryExists(legacy_dir).ok()) {
+    return legacy_dir;
+  }
+  return default_dir;
 #endif  // GOOGLE_JAPANESE_INPUT_BUILD
 
 #elif defined(__APPLE__)

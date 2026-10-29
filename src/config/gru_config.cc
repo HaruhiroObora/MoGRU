@@ -94,6 +94,11 @@ std::vector<std::string> GetCandidateProfileDirs() {
     add_unique(FileUtil::JoinPath(userprofile, "AppData/LocalLow/MoGRU"));
   }
 #endif
+  const std::string server_dir = SystemUtil::GetServerDirectory();
+  if (!server_dir.empty()) {
+    add_unique(server_dir);
+    add_unique(FileUtil::JoinPath(server_dir, "models"));
+  }
   return dirs;
 }
 

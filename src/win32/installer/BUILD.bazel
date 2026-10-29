@@ -66,9 +66,9 @@ config_setting(
     visibility = ["//visibility:private"],
 )
 
-_WXS_FILE = ":installer_oss_64bit.wxs" if BRANDING == "Mozc" else ":installer_64bit.wxs"
+_WXS_FILE = ":installer_oss_64bit.wxs" if BRANDING in ("Mozc", "MoGRU") else ":installer_64bit.wxs"
 
-_MSI_FILE = "Mozc64.msi" if BRANDING == "Mozc" else "GoogleJapaneseInput64.msi"
+_MSI_FILE = "MoGRU64.msi" if BRANDING == "MoGRU" else ("Mozc64.msi" if BRANDING == "Mozc" else "GoogleJapaneseInput64.msi")
 
 selects.config_setting_group(
     name = "build_arm64_binaries",

@@ -31,22 +31,22 @@
 -->
 
 <installer-gui-script minSpecVersion="1">
-    <title>Mozc</title>
+    <title>MoGRU</title>
     <allowed-os-versions>
         <os-version min="12.0"/>
     </allowed-os-versions>
-    <pkg-ref id="org.mozc.pkg.JapaneseInput"/>
+    <pkg-ref id="org.mogru.pkg.JapaneseInput"/>
     <domains enable_localSystem="true"/>
     <options rootVolumeOnly="true"/>
     <options customize="never" require-scripts="false" hostArchitectures="x86_64,arm64"/>
     <choices-outline>
         <line choice="default">
-            <line choice="org.mozc.pkg.JapaneseInput"/>
+            <line choice="org.mogru.pkg.JapaneseInput"/>
         </line>
     </choices-outline>
     <choice id="default"/>
-    <choice id="org.mozc.pkg.JapaneseInput" visible="false">
-        <pkg-ref id="org.mozc.pkg.JapaneseInput"/>
+    <choice id="org.mogru.pkg.JapaneseInput" visible="false">
+        <pkg-ref id="org.mogru.pkg.JapaneseInput"/>
     </choice>
-    <pkg-ref id="org.mozc.pkg.JapaneseInput" version="0" onConclusion="RequireLogout">Mozc.pkg</pkg-ref>
+    <pkg-ref id="org.mogru.pkg.JapaneseInput" version="0" onConclusion="RequireLogout">MoGRU.pkg</pkg-ref>
 </installer-gui-script>

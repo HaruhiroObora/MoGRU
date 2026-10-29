@@ -137,13 +137,16 @@ try {
         }
 
         # 7. Build Mozc Installer for Windows
-        Write-Host "=== Step 2/2: Building Mozc Installer (--config release_build) ===" -ForegroundColor Cyan
+        Write-Host "=== Step 2/2: Building MoGRU Installer (--config release_build) ===" -ForegroundColor Cyan
         Set-Location -Path "$RepoRoot\src"
 
         # Execute Bazel build
         & $BazelBin build package --config release_build
 
-        $MsiPath = "$RepoRoot\src\bazel-bin\win32\installer\Mozc64.msi"
+        $MsiPath = "$RepoRoot\src\bazel-bin\win32\installer\MoGRU64.msi"
+        if (-not (Test-Path $MsiPath)) {
+            $MsiPath = "$RepoRoot\src\bazel-bin\win32\installer\Mozc64.msi"
+        }
         if (-not (Test-Path $MsiPath)) {
             # Check alternate naming
             $MsiFiles = Get-ChildItem -Path "$RepoRoot\src\bazel-bin\win32\installer" -Filter "*.msi" -ErrorAction SilentlyContinue
@@ -159,7 +162,7 @@ try {
     }
 
     # 5. Run MSI Installation
-    Write-Host "=== Installing Mozc ===" -ForegroundColor Cyan
+    Write-Host "=== Installing MoGRU ===" -ForegroundColor Cyan
     $Process = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$MsiPath`" /qb" -Wait -PassThru
     if ($Process.ExitCode -ne 0 -and $Process.ExitCode -ne 3010) {
         Write-Error "msiexec.exe failed with exit code $($Process.ExitCode)."

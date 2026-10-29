@@ -59,11 +59,11 @@ jobs:
         run: |
           bazelisk build package --config release_build
 
-      - name: upload Mozc64_x64.msi
+      - name: upload MoGRU64_x64.msi
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: Mozc64_x64.msi
-          path: src/bazel-bin/win32/installer/Mozc64.msi
+          name: MoGRU64_x64.msi
+          path: src/bazel-bin/win32/installer/*.msi
           if-no-files-found: warn
 
   build_universal_on_x64:
@@ -112,11 +112,11 @@ jobs:
         run: |
           bazelisk build package --config release_build --config win_universal_installer
 
-      - name: upload Mozc64_universal.msi
+      - name: upload MoGRU64_universal.msi
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: Mozc64_universal.msi
-          path: src/bazel-bin/win32/installer/Mozc64.msi
+          name: MoGRU64_universal.msi
+          path: src/bazel-bin/win32/installer/*.msi
           if-no-files-found: warn
 
   build_on_arm64:
@@ -165,11 +165,11 @@ jobs:
         run: |
           bazelisk build package --config release_build
 
-      - name: upload Mozc64_arm64.msi
+      - name: upload MoGRU64_arm64.msi
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: Mozc64_arm64.msi
-          path: src/bazel-bin/win32/installer/Mozc64.msi
+          name: MoGRU64_arm64.msi
+          path: src/bazel-bin/win32/installer/*.msi
           if-no-files-found: warn
 
   test_on_x64:

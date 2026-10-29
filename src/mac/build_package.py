@@ -62,8 +62,8 @@ def main():
   args = ParseArguments()
 
   if args.oss:
-    identifier = 'org.mozc.pkg.JapaneseInput'
-    pkg_name = 'Mozc.pkg'
+    identifier = 'org.mogru.pkg.JapaneseInput'
+    pkg_name = 'MoGRU.pkg'
   else:
     identifier = 'com.google.pkg.GoogleJapaneseInput'
     pkg_name = 'GoogleJapaneseInput.pkg'

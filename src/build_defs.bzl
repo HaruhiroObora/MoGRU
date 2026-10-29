@@ -228,6 +228,7 @@ def mozc_win32_resource_from_template(
     )
     _rc_defines = {
         "Mozc": ["MOZC_BUILD"],
+        "MoGRU": ["MOZC_BUILD"],
         "GoogleJapaneseInput": ["GOOGLE_JAPANESE_INPUT_BUILD"],
     }.get(BRANDING, [])
 
@@ -394,7 +395,7 @@ def mozc_win32_cc_prod_binary(
       visibility: optional. The visibility of the target.
       **kwargs: other arguments passed to mozc_cc_binary.
     """
-    target_name = executable_name_map.get(BRANDING, None)
+    target_name = executable_name_map.get(BRANDING, executable_name_map.get("Mozc", None))
     if target_name == None:
         return
 

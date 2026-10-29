@@ -125,6 +125,11 @@ alias(
     actual = ":mozc_macos",
 )
 
+alias(
+    name = "MoGRU",
+    actual = ":mozc_macos",
+)
+
 mozc_objc_library(
     name = "common",
     hdrs = ["common.h"],
@@ -342,7 +347,7 @@ mozc_macos_application(
     bundle_name = "Uninstall" +
                   mozc_select(
                       default = "GoogleJapaneseInput",
-                      oss = "Mozc",
+                      oss = "MoGRU",
                       prod = "GoogleJapaneseInput",
                   ),
     infoplists = ["Uninstaller/Info.plist"],
@@ -502,7 +507,7 @@ mozc_py_binary(
 genrule(
     name = "package",
     srcs = [":package_files"],
-    outs = ["Mozc.pkg"],
+    outs = ["MoGRU.pkg"],
     cmd = "$(location :build_package) --input $(location :package_files)" +
           " --output $@" +
           ' --codesign_identity "' + CODESIGN_IDENTITY_INSTALLER_SELECT + '"' +
@@ -530,7 +535,7 @@ genrule(
         ":keystone_install",
         ":package",
     ],
-    outs = ["Mozc.dmg"],
+    outs = ["MoGRU.dmg"],
     cmd = " ".join([
         "$(location //build_tools:build_diskimage_mac)",
         "--output $@",
@@ -539,7 +544,7 @@ genrule(
     ]) +
     # mozc_select cannot be in join, as it's treated as a function rather than a string.
     mozc_select(
-        default = " --volname Mozc",
+        default = " --volname MoGRU",
         prod = " --volname GoogleJapaneseInput",
     ),
     exec_compatible_with = ["@platforms//os:macos"],
@@ -553,7 +558,7 @@ genrule(
 genrule(
     name = "diskimage_signed",
     srcs = [":diskimage"],
-    outs = ["Mozc_signed.dmg"],
+    outs = ["MoGRU_signed.dmg"],
     cmd = " ".join([
         "cp $(location :diskimage) $@ &&",
         "chmod u+w $@ &&",
@@ -565,7 +570,7 @@ genrule(
     ]) +
     # mozc_select cannot be in join, as it's treated as a function rather than a string.
     mozc_select(
-        default = " --identifier Mozc",
+        default = " --identifier MoGRU",
         prod = " --identifier GoogleJapaneseInput",
     ) + ' --sign "' + CODESIGN_IDENTITY_SELECT + '"' + " $@",
     exec_compatible_with = ["@platforms//os:macos"],

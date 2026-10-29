@@ -152,8 +152,12 @@ else
     "$BAZEL_BIN" build //mac:mozc_macos --config release_build
   }
 
-  if [ -f "$REPO_ROOT/src/bazel-bin/mac/Mozc.pkg" ]; then
+  if [ -f "$REPO_ROOT/src/bazel-bin/mac/MoGRU.pkg" ]; then
+    SOURCE_PKG="$REPO_ROOT/src/bazel-bin/mac/MoGRU.pkg"
+  elif [ -f "$REPO_ROOT/src/bazel-bin/mac/Mozc.pkg" ]; then
     SOURCE_PKG="$REPO_ROOT/src/bazel-bin/mac/Mozc.pkg"
+  elif [ -d "$REPO_ROOT/src/bazel-bin/mac/MoGRU.app" ]; then
+    SOURCE_APP="$REPO_ROOT/src/bazel-bin/mac/MoGRU.app"
   elif [ -d "$REPO_ROOT/src/bazel-bin/mac/Mozc.app" ]; then
     SOURCE_APP="$REPO_ROOT/src/bazel-bin/mac/Mozc.app"
   fi
@@ -212,14 +216,17 @@ if [ -n "$SOURCE_PKG" ] && [ -e "$SOURCE_PKG" ]; then
 elif [ -n "$SOURCE_APP" ] && [ -d "$SOURCE_APP" ]; then
   TARGET_DIR="$HOME/Library/Input Methods"
   mkdir -p "$TARGET_DIR"
+  killall MoGRUConverter 2>/dev/null || true
+  killall MoGRURenderer 2>/dev/null || true
+  killall MoGRU 2>/dev/null || true
   killall MozcConverter 2>/dev/null || true
   killall MozcRenderer 2>/dev/null || true
   killall Mozc 2>/dev/null || true
-  rm -rf "$TARGET_DIR/Mozc.app"
-  cp -R "$SOURCE_APP" "$TARGET_DIR/Mozc.app"
-  echo "[+] Mozc.app copied to $TARGET_DIR/"
+  rm -rf "$TARGET_DIR/MoGRU.app" "$TARGET_DIR/Mozc.app"
+  cp -R "$SOURCE_APP" "$TARGET_DIR/MoGRU.app"
+  echo "[+] MoGRU.app copied to $TARGET_DIR/"
 else
-  echo "[Error] Neither Mozc.pkg nor Mozc.app was found to install."
+  echo "[Error] Neither MoGRU.pkg/Mozc.pkg nor MoGRU.app/Mozc.app was found to install."
   exit 1
 fi
 

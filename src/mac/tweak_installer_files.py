@@ -112,7 +112,7 @@ def SymlinkQtFrameworks(app_dir: str) -> None:
 
 def TweakQtApps(top_dir: str, oss: bool) -> None:
   """Tweak the resource files for the Qt applications."""
-  name = 'Mozc' if oss else 'GoogleJapaneseInput'
+  name = 'MoGRU' if oss else 'GoogleJapaneseInput'
   sub_qt_apps = [
       'AboutDialog',
       'DictionaryTool',
@@ -142,8 +142,8 @@ def TweakForProductbuild(
 
   if oss:
     is_dev_channel = False
-    name = 'Mozc'
-    folder = 'Mozc'
+    name = 'MoGRU'
+    folder = 'MoGRU'
   else:
     is_dev_channel = channel == 'dev'
     name = 'GoogleJapaneseInput'
@@ -191,8 +191,8 @@ def TweakForProductbuild(
 
   if tweak_qt:
     resources_dir = f'/Library/Input Methods/{name}.app/Contents/Resources/'
-    # /Applications/Mozc/ConfigDialog.app is a symlink to
-    # /Library/Input Method/Mozc.app/Contents/Resources/ConfigDialog.app
+    # /Applications/MoGRU/ConfigDialog.app is a symlink to
+    # /Library/Input Methods/MoGRU.app/Contents/Resources/ConfigDialog.app
     os.symlink(
         resources_dir + 'ConfigDialog.app/',
         f'root/Applications/{folder}/ConfigDialog.app',

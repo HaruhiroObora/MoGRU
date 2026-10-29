@@ -130,7 +130,7 @@ def run_wix4(args) -> None:
     omaha_clientstate_key = (
         f'Software\\Google\\Update\\ClientState\\{{{omaha_guid}}}'
     )
-  elif branding == 'Mozc':
+  elif branding in ('Mozc', 'MoGRU'):
     upgrade_code = 'DD94B570-B5E2-4100-9D42-61930C611D8A'
 
   omaha_channel_type = 'dev' if version.IsDevChannel() else 'stable'
