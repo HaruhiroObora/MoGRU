@@ -41,6 +41,9 @@ struct GruPenaltyConfig {
   bool enable_live_conversion = true;
   bool show_segment_separator_in_conversion = false;
   bool show_segment_separator_in_live_conversion = false;
+  bool enable_live_conversion_prefix_freezing = true;
+  bool enable_live_conversion_auto_commit = false;
+  int32_t live_conversion_length_threshold = 24;
   std::string gru_model_path = "";
   std::string gru_chardata_path = "";
   std::string gru_user_model_path = "";
@@ -127,6 +130,24 @@ class GruConfigManager {
   // in live conversion is enabled in gru_config.ini.
   static bool IsShowSegmentSeparatorInLiveConversionEnabled(
       bool flag_default = false,
+      const std::string& explicit_config_path = "");
+
+  // Fast (1-second throttled mtime check) query for whether live conversion prefix
+  // freezing is enabled in gru_config.ini.
+  static bool IsLiveConversionPrefixFreezingEnabled(
+      bool flag_default = true,
+      const std::string& explicit_config_path = "");
+
+  // Fast (1-second throttled mtime check) query for whether live conversion auto
+  // commit is enabled in gru_config.ini.
+  static bool IsLiveConversionAutoCommitEnabled(
+      bool flag_default = false,
+      const std::string& explicit_config_path = "");
+
+  // Fast (1-second throttled mtime check) query for live conversion length threshold
+  // in gru_config.ini.
+  static int32_t GetLiveConversionLengthThreshold(
+      int32_t flag_default = 24,
       const std::string& explicit_config_path = "");
 };
 

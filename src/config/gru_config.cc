@@ -266,6 +266,20 @@ std::string GruConfigManager::FormatConfigIni(const GruPenaltyConfig& config) {
       "# - true: ライブ変換中のプリエディットに文節区切り「/」を表示, false: 非表示\n"
       "show_segment_separator_in_live_conversion = %s\n"
       "\n"
+      "# 【ライブ変換時の前文節固定（計算量抑制）の有効化】 (初期値: true)\n"
+      "# - 指定文字数を超えた際に前半分程度の文節を固定（変換停止）し、計算量を抑制します。\n"
+      "# - true: 有効（固定文節とアクティブ文節の境界に「／」を表示）, false: 無効（常に全文変換）\n"
+      "enable_live_conversion_prefix_freezing = %s\n"
+      "\n"
+      "# 【ライブ変換時の自動確定（段階的確定）の有効化】 (初期値: false)\n"
+      "# - 前文節が固定された後、次のライブ変換更新タイミング（次のキー入力）で自動確定します。\n"
+      "# - true: 有効, false: 無効（Enterキーを押すまでPreedit内に保持）\n"
+      "enable_live_conversion_auto_commit = %s\n"
+      "\n"
+      "# 【ライブ変換の文節固定・自動確定トリガー文字数閾値】 (初期値: 24)\n"
+      "# - 確定平仮名キーの文字数がこの値以上になった際に前文節を固定します。\n"
+      "live_conversion_length_threshold = %d\n"
+      "\n"
       "# 【ベース言語モデルファイル (grumodel.bin) のパス】 (初期値: 空欄 = 標準パスを自動検出)\n"
       "gru_model_path = %s\n"
       "\n"
@@ -350,6 +364,9 @@ std::string GruConfigManager::FormatConfigIni(const GruPenaltyConfig& config) {
       config.enable_live_conversion ? "true" : "false",
       config.show_segment_separator_in_conversion ? "true" : "false",
       config.show_segment_separator_in_live_conversion ? "true" : "false",
+      config.enable_live_conversion_prefix_freezing ? "true" : "false",
+      config.enable_live_conversion_auto_commit ? "true" : "false",
+      config.live_conversion_length_threshold,
       config.gru_model_path,
       config.gru_chardata_path,
       config.gru_user_model_path,
@@ -433,6 +450,21 @@ void GruConfigManager::EnsureConfigFileExists(const std::string& path) {
     append_content +=
         "\n# 【ライブ変換時の文節区切り「/」表示】 (初期値: false)\n"
         "show_segment_separator_in_live_conversion = false\n";
+  }
+  if (content.find("enable_live_conversion_prefix_freezing") == std::string::npos) {
+    append_content +=
+        "\n# 【ライブ変換時の前文節固定（計算量抑制）の有効化】 (初期値: true)\n"
+        "enable_live_conversion_prefix_freezing = true\n";
+  }
+  if (content.find("enable_live_conversion_auto_commit") == std::string::npos) {
+    append_content +=
+        "\n# 【ライブ変換時の自動確定（段階的確定）の有効化】 (初期値: false)\n"
+        "enable_live_conversion_auto_commit = false\n";
+  }
+  if (content.find("live_conversion_length_threshold") == std::string::npos) {
+    append_content +=
+        "\n# 【ライブ変換の文節固定・自動確定トリガー文字数閾値】 (初期値: 24)\n"
+        "live_conversion_length_threshold = 24\n";
   }
   if (content.find("gru_model_path") == std::string::npos) {
     append_content +=
@@ -606,6 +638,27 @@ GruPenaltyConfig GruConfigManager::ParseConfigFile(
       }
       continue;
     }
+    if (key == "enable_live_conversion_prefix_freezing") {
+      bool b = true;
+      if (absl::SimpleAtob(val, &b)) {
+        config.enable_live_conversion_prefix_freezing = b;
+      }
+      continue;
+    }
+    if (key == "enable_live_conversion_auto_commit") {
+      bool b = false;
+      if (absl::SimpleAtob(val, &b)) {
+        config.enable_live_conversion_auto_commit = b;
+      }
+      continue;
+    }
+    if (key == "live_conversion_length_threshold") {
+      int32_t val_int = 24;
+      if (absl::SimpleAtoi(val, &val_int)) {
+        config.live_conversion_length_threshold = std::max<int32_t>(1, val_int);
+      }
+      continue;
+    }
     if (key == "show_gru_score") {
       bool b = true;
       if (absl::SimpleAtob(val, &b)) {
@@ -694,6 +747,18 @@ void GruConfigManager::ApplyEnvOverrides(GruPenaltyConfig* config) {
   if (const char* e = std::getenv("MOZC_GRU_SHOW_SEGMENT_SEPARATOR_IN_LIVE_CONVERSION")) {
     bool b = false;
     if (absl::SimpleAtob(e, &b)) config->show_segment_separator_in_live_conversion = b;
+  }
+  if (const char* e = std::getenv("MOZC_GRU_ENABLE_LIVE_CONVERSION_PREFIX_FREEZING")) {
+    bool b = true;
+    if (absl::SimpleAtob(e, &b)) config->enable_live_conversion_prefix_freezing = b;
+  }
+  if (const char* e = std::getenv("MOZC_GRU_ENABLE_LIVE_CONVERSION_AUTO_COMMIT")) {
+    bool b = false;
+    if (absl::SimpleAtob(e, &b)) config->enable_live_conversion_auto_commit = b;
+  }
+  if (const char* e = std::getenv("MOZC_GRU_LIVE_CONVERSION_LENGTH_THRESHOLD")) {
+    int32_t val_int = 24;
+    if (absl::SimpleAtoi(e, &val_int)) config->live_conversion_length_threshold = std::max<int32_t>(1, val_int);
   }
   if (const char* e = std::getenv("MOZC_GRU_MODEL_PATH")) {
     if (e[0] != '\0') config->gru_model_path = e;
@@ -844,7 +909,10 @@ bool GruConfigManager::IsLiveConversionEnabled(
   const std::string path =
       ResolveConfigFilePath(explicit_config_path, /*allow_in_test=*/false);
   if (path.empty()) {
-    return flag_default;
+    GruPenaltyConfig cfg;
+    cfg.enable_live_conversion = flag_default;
+    ApplyEnvOverrides(&cfg);
+    return cfg.enable_live_conversion;
   }
 
   const absl::Time now = absl::Now();
@@ -883,7 +951,10 @@ bool GruConfigManager::IsShowSegmentSeparatorInConversionEnabled(
   const std::string path =
       ResolveConfigFilePath(explicit_config_path, /*allow_in_test=*/false);
   if (path.empty()) {
-    return flag_default;
+    GruPenaltyConfig cfg;
+    cfg.show_segment_separator_in_conversion = flag_default;
+    ApplyEnvOverrides(&cfg);
+    return cfg.show_segment_separator_in_conversion;
   }
 
   const absl::Time now = absl::Now();
@@ -922,7 +993,10 @@ bool GruConfigManager::IsShowSegmentSeparatorInLiveConversionEnabled(
   const std::string path =
       ResolveConfigFilePath(explicit_config_path, /*allow_in_test=*/false);
   if (path.empty()) {
-    return flag_default;
+    GruPenaltyConfig cfg;
+    cfg.show_segment_separator_in_live_conversion = flag_default;
+    ApplyEnvOverrides(&cfg);
+    return cfg.show_segment_separator_in_live_conversion;
   }
 
   const absl::Time now = absl::Now();
@@ -942,6 +1016,132 @@ bool GruConfigManager::IsShowSegmentSeparatorInLiveConversionEnabled(
     GruPenaltyConfig parsed = ParseConfigFile(path, base);
     ApplyEnvOverrides(&parsed);
     cached_value = parsed.show_segment_separator_in_live_conversion;
+    has_cached = true;
+  }
+  return cached_value;
+}
+
+bool GruConfigManager::IsLiveConversionPrefixFreezingEnabled(
+    bool flag_default,
+    const std::string& explicit_config_path) {
+  static absl::NoDestructor<absl::Mutex> mutex;
+  static absl::Time last_check_time = absl::InfinitePast();
+  static int64_t last_mtime = -1;
+  static std::string last_path;
+  static bool cached_value = true;
+  static bool has_cached = false;
+
+  absl::MutexLock lock(*mutex);
+  const std::string path =
+      ResolveConfigFilePath(explicit_config_path, /*allow_in_test=*/false);
+  if (path.empty()) {
+    GruPenaltyConfig cfg;
+    cfg.enable_live_conversion_prefix_freezing = flag_default;
+    ApplyEnvOverrides(&cfg);
+    return cfg.enable_live_conversion_prefix_freezing;
+  }
+
+  const absl::Time now = absl::Now();
+  if (has_cached && path == last_path &&
+      (now - last_check_time) < absl::Seconds(1)) {
+    return cached_value;
+  }
+  last_check_time = now;
+
+  EnsureConfigFileExists(path);
+  const int64_t mtime = GetFileMtime(path);
+  if (!has_cached || path != last_path || mtime != last_mtime) {
+    last_path = path;
+    last_mtime = mtime;
+    GruPenaltyConfig base;
+    base.enable_live_conversion_prefix_freezing = flag_default;
+    GruPenaltyConfig parsed = ParseConfigFile(path, base);
+    ApplyEnvOverrides(&parsed);
+    cached_value = parsed.enable_live_conversion_prefix_freezing;
+    has_cached = true;
+  }
+  return cached_value;
+}
+
+bool GruConfigManager::IsLiveConversionAutoCommitEnabled(
+    bool flag_default,
+    const std::string& explicit_config_path) {
+  static absl::NoDestructor<absl::Mutex> mutex;
+  static absl::Time last_check_time = absl::InfinitePast();
+  static int64_t last_mtime = -1;
+  static std::string last_path;
+  static bool cached_value = false;
+  static bool has_cached = false;
+
+  absl::MutexLock lock(*mutex);
+  const std::string path =
+      ResolveConfigFilePath(explicit_config_path, /*allow_in_test=*/false);
+  if (path.empty()) {
+    GruPenaltyConfig cfg;
+    cfg.enable_live_conversion_auto_commit = flag_default;
+    ApplyEnvOverrides(&cfg);
+    return cfg.enable_live_conversion_auto_commit;
+  }
+
+  const absl::Time now = absl::Now();
+  if (has_cached && path == last_path &&
+      (now - last_check_time) < absl::Seconds(1)) {
+    return cached_value;
+  }
+  last_check_time = now;
+
+  EnsureConfigFileExists(path);
+  const int64_t mtime = GetFileMtime(path);
+  if (!has_cached || path != last_path || mtime != last_mtime) {
+    last_path = path;
+    last_mtime = mtime;
+    GruPenaltyConfig base;
+    base.enable_live_conversion_auto_commit = flag_default;
+    GruPenaltyConfig parsed = ParseConfigFile(path, base);
+    ApplyEnvOverrides(&parsed);
+    cached_value = parsed.enable_live_conversion_auto_commit;
+    has_cached = true;
+  }
+  return cached_value;
+}
+
+int32_t GruConfigManager::GetLiveConversionLengthThreshold(
+    int32_t flag_default,
+    const std::string& explicit_config_path) {
+  static absl::NoDestructor<absl::Mutex> mutex;
+  static absl::Time last_check_time = absl::InfinitePast();
+  static int64_t last_mtime = -1;
+  static std::string last_path;
+  static int32_t cached_value = 24;
+  static bool has_cached = false;
+
+  absl::MutexLock lock(*mutex);
+  const std::string path =
+      ResolveConfigFilePath(explicit_config_path, /*allow_in_test=*/false);
+  if (path.empty()) {
+    GruPenaltyConfig cfg;
+    cfg.live_conversion_length_threshold = flag_default;
+    ApplyEnvOverrides(&cfg);
+    return cfg.live_conversion_length_threshold;
+  }
+
+  const absl::Time now = absl::Now();
+  if (has_cached && path == last_path &&
+      (now - last_check_time) < absl::Seconds(1)) {
+    return cached_value;
+  }
+  last_check_time = now;
+
+  EnsureConfigFileExists(path);
+  const int64_t mtime = GetFileMtime(path);
+  if (!has_cached || path != last_path || mtime != last_mtime) {
+    last_path = path;
+    last_mtime = mtime;
+    GruPenaltyConfig base;
+    base.live_conversion_length_threshold = flag_default;
+    GruPenaltyConfig parsed = ParseConfigFile(path, base);
+    ApplyEnvOverrides(&parsed);
+    cached_value = parsed.live_conversion_length_threshold;
     has_cached = true;
   }
   return cached_value;

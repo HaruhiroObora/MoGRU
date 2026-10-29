@@ -196,6 +196,10 @@ class EngineConverter : public EngineConverterInterface {
   void CommitHead(size_t count, const composer::Composer& composer,
                   size_t* consumed_key_size) override;
 
+  bool PopPendingAutoCommit(const composer::Composer& composer,
+                            const commands::Context& context,
+                            size_t* consumed_key_chars) override;
+
   // Reverts the last "Commit" operation
   void Revert() override;
 
@@ -366,6 +370,9 @@ class EngineConverter : public EngineConverterInterface {
 
   bool IsEmptySegment(const Segment& segment) const;
 
+  // Calculates the number of front segments corresponding to roughly 50% character length.
+  size_t CalculateFrontHalfSegmentsCount(const Segments& segments) const;
+
   // Handles selected_indices for usage stats.
   void InitializeSelectedCandidateIndices();
   void UpdateSelectedCandidateIndex();
@@ -435,6 +442,9 @@ class EngineConverter : public EngineConverterInterface {
   bool live_conversion_active_ = false;
   std::string live_conversion_key_;
   std::string live_conversion_tail_;
+  std::vector<Segment> live_conversion_frozen_segments_;
+  std::string live_conversion_frozen_key_;
+  bool auto_commit_pending_ = false;
 };
 
 }  // namespace engine

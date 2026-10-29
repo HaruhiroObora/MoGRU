@@ -212,6 +212,15 @@ class EngineConverterInterface {
   virtual void CommitHead(size_t count, const composer::Composer& composer,
                           size_t* committed_size) = 0;
 
+  // Checks and executes pending auto-commit of frozen segments in live conversion.
+  // Returns true if auto-commit was performed, setting *consumed_key_chars to the
+  // number of key characters to delete from Composer.
+  virtual bool PopPendingAutoCommit(const composer::Composer& composer,
+                                    const commands::Context& context,
+                                    size_t* consumed_key_chars) {
+    return false;
+  }
+
   // Revert the last "Commit" operation
   virtual void Revert() = 0;
 

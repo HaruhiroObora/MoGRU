@@ -158,6 +158,9 @@ bool EngineConverter::Convert(const composer::Composer& composer,
   live_conversion_active_ = false;
   live_conversion_key_.clear();
   live_conversion_tail_.clear();
+  live_conversion_frozen_segments_.clear();
+  live_conversion_frozen_key_.clear();
+  auto_commit_pending_ = false;
 
   DCHECK(request_);
   DCHECK(config_);
@@ -504,6 +507,11 @@ bool EngineConverter::Suggest(const composer::Composer& composer,
   DCHECK(CheckState(COMPOSITION | SUGGESTION));
   candidate_list_visible_ = false;
 
+  std::vector<Segment> saved_frozen_segments =
+      std::move(live_conversion_frozen_segments_);
+  std::string saved_frozen_key = std::move(live_conversion_frozen_key_);
+  bool saved_auto_commit_pending = auto_commit_pending_;
+
   // Normalize the current state by resetting the previous state.
   ResetState();
 
@@ -517,6 +525,9 @@ bool EngineConverter::Suggest(const composer::Composer& composer,
   // the candidate window during composition.
   if (absl::GetFlag(FLAGS_enable_live_conversion) &&
       config::GruConfigManager::IsLiveConversionEnabled(true)) {
+    live_conversion_frozen_segments_ = std::move(saved_frozen_segments);
+    live_conversion_frozen_key_ = std::move(saved_frozen_key);
+    auto_commit_pending_ = saved_auto_commit_pending;
     if (composer.Empty() ||
         composer.GetInputMode() != transliteration::HIRAGANA ||
         composer.GetOutputMode() != transliteration::HIRAGANA ||
@@ -539,6 +550,32 @@ bool EngineConverter::Suggest(const composer::Composer& composer,
           Util::Utf8SubString(preedit, pred_chars, preedit_chars - pred_chars));
     }
 
+    std::string active_key = pred_key;
+    if (!live_conversion_frozen_segments_.empty()) {
+      if (pred_key.starts_with(live_conversion_frozen_key_)) {
+        active_key = pred_key.substr(live_conversion_frozen_key_.size());
+      } else {
+        // Backspaced or edited into frozen part -> unfreeze and re-convert all.
+        live_conversion_frozen_segments_.clear();
+        live_conversion_frozen_key_.clear();
+        auto_commit_pending_ = false;
+        active_key = pred_key;
+      }
+    }
+
+    if (active_key.empty()) {
+      segments_.clear_conversion_segments();
+      segment_index_ = 0;
+      state_ = SUGGESTION;
+      live_conversion_active_ = true;
+      live_conversion_key_ = pred_key;
+      live_conversion_tail_ = std::move(tail);
+      UpdateCandidateList();
+      candidate_list_visible_ = false;
+      InitializeSelectedCandidateIndices();
+      return true;
+    }
+
     ConversionRequest::Options live_options;
     live_options.enable_user_history_for_conversion = preferences.use_history;
     live_options.composer_key_selection = ConversionRequest::PREDICTION_KEY;
@@ -554,6 +591,7 @@ bool EngineConverter::Suggest(const composer::Composer& composer,
             .SetContextView(context)
             .SetConfigView(*config_)
             .SetOptions(std::move(live_options))
+            .SetKey(active_key)
             .Build();
 
     if (!converter_->StartConversion(live_request, &segments_) ||
@@ -561,6 +599,31 @@ bool EngineConverter::Suggest(const composer::Composer& composer,
       converter_->CancelConversion(&segments_);
       ResetState();
       return false;
+    }
+
+    const bool prefix_freezing_enabled =
+        config::GruConfigManager::IsLiveConversionPrefixFreezingEnabled(true);
+    const bool auto_commit_enabled =
+        config::GruConfigManager::IsLiveConversionAutoCommitEnabled(false);
+    const int32_t threshold =
+        config::GruConfigManager::GetLiveConversionLengthThreshold(24);
+
+    if ((prefix_freezing_enabled || auto_commit_enabled) &&
+        Util::CharsLen(active_key) >= static_cast<size_t>(threshold) &&
+        segments_.conversion_segments_size() >= 2) {
+      const size_t k = CalculateFrontHalfSegmentsCount(segments_);
+      if (k > 0 && k < segments_.conversion_segments_size()) {
+        for (size_t i = 0; i < k; ++i) {
+          Segment frozen_seg = segments_.conversion_segment(i);
+          live_conversion_frozen_key_.append(frozen_seg.key());
+          live_conversion_frozen_segments_.push_back(std::move(frozen_seg));
+        }
+        segments_.erase_segments(segments_.history_segments_size(), k);
+
+        if (auto_commit_enabled) {
+          auto_commit_pending_ = true;
+        }
+      }
     }
 
     segment_index_ = 0;
@@ -691,6 +754,9 @@ bool EngineConverter::Predict(const composer::Composer& composer,
   live_conversion_active_ = false;
   live_conversion_key_.clear();
   live_conversion_tail_.clear();
+  live_conversion_frozen_segments_.clear();
+  live_conversion_frozen_key_.clear();
+  auto_commit_pending_ = false;
 
   // Initialize the segments and conversion_request for prediction
   ConversionRequest::Options options;
@@ -1001,47 +1067,86 @@ void EngineConverter::CommitPreedit(const composer::Composer& composer,
     // (e.g. "kan" -> pred_key="か", conv_key="かん"), re-run conversion with
     // the full conversion key before committing.
     if (conv_key != live_conversion_key_ && conv_key.ends_with("ん")) {
-      ConversionRequest::Options live_options;
-      live_options.enable_user_history_for_conversion =
-          conversion_preferences_.use_history;
-      SetRequestType(ConversionRequest::CONVERSION, live_options);
-      segments_.clear_conversion_segments();
-      const ConversionRequest live_request =
-          ConversionRequestBuilder()
-              .SetComposer(composer)
-              .SetRequestView(*request_)
-              .SetContextView(context)
-              .SetConfigView(*config_)
-              .SetOptions(std::move(live_options))
-              .Build();
-      if (converter_->StartConversion(live_request, &segments_) &&
-          segments_.conversion_segments_size() > 0) {
-        live_conversion_key_ = conv_key;
-        live_conversion_tail_.clear();
-        segment_index_ = 0;
-        UpdateCandidateList();
-        InitializeSelectedCandidateIndices();
+      std::string active_conv_key = conv_key;
+      if (!live_conversion_frozen_key_.empty() &&
+          conv_key.starts_with(live_conversion_frozen_key_)) {
+        active_conv_key = conv_key.substr(live_conversion_frozen_key_.size());
+      }
+      if (!active_conv_key.empty()) {
+        ConversionRequest::Options live_options;
+        live_options.enable_user_history_for_conversion =
+            conversion_preferences_.use_history;
+        SetRequestType(ConversionRequest::CONVERSION, live_options);
+        segments_.clear_conversion_segments();
+        const ConversionRequest live_request =
+            ConversionRequestBuilder()
+                .SetComposer(composer)
+                .SetRequestView(*request_)
+                .SetContextView(context)
+                .SetConfigView(*config_)
+                .SetOptions(std::move(live_options))
+                .SetKey(active_conv_key)
+                .Build();
+        if (converter_->StartConversion(live_request, &segments_) &&
+            segments_.conversion_segments_size() > 0) {
+          live_conversion_key_ = conv_key;
+          live_conversion_tail_.clear();
+          segment_index_ = 0;
+          UpdateCandidateList();
+          InitializeSelectedCandidateIndices();
+        }
       }
     }
 
-    if (segments_.conversion_segments_size() > 0) {
+    if (segments_.conversion_segments_size() > 0 ||
+        !live_conversion_frozen_segments_.empty()) {
       const std::string tail =
           TextNormalizer::NormalizeText(live_conversion_tail_);
       state_ = CONVERSION;
       ResetResult();
-      if (!UpdateResult(0, segments_.conversion_segments_size(), nullptr)) {
-        Cancel();
-        ResetState();
-        return;
+
+      std::string frozen_key;
+      std::string frozen_val;
+      for (const Segment& seg : live_conversion_frozen_segments_) {
+        if (seg.candidates_size() > 0) {
+          frozen_key += seg.key();
+          frozen_val += seg.candidate(0).value;
+        }
       }
+
+      if (segments_.conversion_segments_size() > 0) {
+        if (!UpdateResult(0, segments_.conversion_segments_size(), nullptr)) {
+          Cancel();
+          ResetState();
+          return;
+        }
+      }
+
+      if (!frozen_val.empty()) {
+        result_.set_type(commands::Result::STRING);
+        result_.set_key(frozen_key + result_.key());
+        result_.set_value(frozen_val + result_.value());
+      }
+
       if (!tail.empty()) {
         result_.mutable_key()->append(tail);
         result_.mutable_value()->append(tail);
         commands::ResultToken* token = result_.add_tokens();
         token->set_key(tail);
         token->set_value(tail);
-        output::FillCursorOffsetResult(CalculateCursorOffset(result_.value()),
-                                       &result_);
+      }
+      output::FillCursorOffsetResult(CalculateCursorOffset(result_.value()),
+                                     &result_);
+
+      if (!live_conversion_frozen_segments_.empty()) {
+        Segments commit_frozen;
+        for (const Segment& seg : live_conversion_frozen_segments_) {
+          Segment* s = commit_frozen.add_segment();
+          *s = seg;
+          s->set_segment_type(Segment::SUBMITTED);
+        }
+        std::vector<size_t> cand_ids(commit_frozen.conversion_segments_size(), 0);
+        converter_->CommitSegments(&commit_frozen, cand_ids);
       }
 
       for (size_t i = 0; i < segments_.conversion_segments_size();
@@ -1505,6 +1610,9 @@ void EngineConverter::ResetState() {
   live_conversion_active_ = false;
   live_conversion_key_.clear();
   live_conversion_tail_.clear();
+  live_conversion_frozen_segments_.clear();
+  live_conversion_frozen_key_.clear();
+  auto_commit_pending_ = false;
 }
 
 void EngineConverter::SegmentFocus() {
@@ -1853,18 +1961,15 @@ void EngineConverter::FillLiveConversionPreedit(
       config::GruConfigManager::IsShowSegmentSeparatorInLiveConversionEnabled(false);
   size_t cursor = 0;
   bool first_segment = true;
-  for (size_t i = 0; i < segments_.conversion_segments_size();
-       i += GetSegmentSpan(i)) {
-    const Segment& segment = segments_.conversion_segment(i);
+
+  // 1. Render frozen segments
+  for (size_t i = 0; i < live_conversion_frozen_segments_.size(); ++i) {
+    const Segment& segment = live_conversion_frozen_segments_[i];
     if (segment.candidates_size() == 0) {
       continue;
     }
-    const converter::Candidate& candidate = GetSelectedCandidate(i);
-    std::string normalized_key = TextNormalizer::NormalizeText(
-        (candidate.effective_converted_segment_count() > 1 &&
-         !candidate.key.empty())
-            ? candidate.key
-            : segment.key());
+    const converter::Candidate& candidate = segment.candidate(0);
+    std::string normalized_key = TextNormalizer::NormalizeText(segment.key());
     if (candidate.value.empty()) {
       continue;
     }
@@ -1884,14 +1989,61 @@ void EngineConverter::FillLiveConversionPreedit(
     seg->set_annotation(commands::Preedit::Segment::UNDERLINE);
     cursor += seg->value_length();
   }
+
+  bool at_frozen_boundary = !live_conversion_frozen_segments_.empty();
+
+  // 2. Render active conversion segments
+  for (size_t i = 0; i < segments_.conversion_segments_size();
+       i += GetSegmentSpan(i)) {
+    const Segment& segment = segments_.conversion_segment(i);
+    if (segment.candidates_size() == 0) {
+      continue;
+    }
+    const converter::Candidate& candidate = GetSelectedCandidate(i);
+    std::string normalized_key = TextNormalizer::NormalizeText(
+        (candidate.effective_converted_segment_count() > 1 &&
+         !candidate.key.empty())
+            ? candidate.key
+            : segment.key());
+    if (candidate.value.empty()) {
+      continue;
+    }
+    if (show_sep && !first_segment) {
+      commands::Preedit::Segment* sep = preedit->add_segment();
+      if (at_frozen_boundary) {
+        sep->set_key("／");
+        sep->set_value("／");
+        at_frozen_boundary = false;
+      } else {
+        sep->set_key("/");
+        sep->set_value("/");
+      }
+      sep->set_value_length(1);
+      sep->set_annotation(commands::Preedit::Segment::NONE);
+      cursor += 1;
+    }
+    first_segment = false;
+    commands::Preedit::Segment* seg = preedit->add_segment();
+    seg->set_key(std::move(normalized_key));
+    seg->set_value_length(Util::CharsLen(candidate.value));
+    seg->set_value(candidate.value);
+    seg->set_annotation(commands::Preedit::Segment::UNDERLINE);
+    cursor += seg->value_length();
+  }
   if (!live_conversion_tail_.empty()) {
     std::string normalized_tail =
         TextNormalizer::NormalizeText(live_conversion_tail_);
     if (!normalized_tail.empty()) {
       if (show_sep && !first_segment) {
         commands::Preedit::Segment* sep = preedit->add_segment();
-        sep->set_key("/");
-        sep->set_value("/");
+        if (at_frozen_boundary) {
+          sep->set_key("／");
+          sep->set_value("／");
+          at_frozen_boundary = false;
+        } else {
+          sep->set_key("/");
+          sep->set_value("/");
+        }
         sep->set_value_length(1);
         sep->set_annotation(commands::Preedit::Segment::NONE);
         cursor += 1;
@@ -2192,6 +2344,96 @@ void EngineConverter::CommitSegmentsSize(size_t commit_segments_size) {
   CHECK_LE(commit_segments_size, selected_candidate_indices_.size());
   const auto it = selected_candidate_indices_.begin();
   selected_candidate_indices_.erase(it, it + commit_segments_size);
+}
+
+size_t EngineConverter::CalculateFrontHalfSegmentsCount(
+    const Segments& segments) const {
+  const size_t m = segments.conversion_segments_size();
+  if (m < 2) return 0;
+
+  size_t total_chars = 0;
+  for (size_t i = 0; i < m; ++i) {
+    total_chars += Util::CharsLen(segments.conversion_segment(i).key());
+  }
+
+  const double half_chars = static_cast<double>(total_chars) / 2.0;
+  size_t best_k = 1;
+  double min_diff = 1e9;
+  size_t cum_chars = 0;
+  for (size_t i = 0; i < m - 1; ++i) {
+    cum_chars += Util::CharsLen(segments.conversion_segment(i).key());
+    const double diff = std::abs(static_cast<double>(cum_chars) - half_chars);
+    if (diff < min_diff) {
+      min_diff = diff;
+      best_k = i + 1;
+    }
+  }
+  return best_k;
+}
+
+bool EngineConverter::PopPendingAutoCommit(
+    const composer::Composer& composer,
+    const commands::Context& context,
+    size_t* consumed_key_chars) {
+  if (consumed_key_chars) {
+    *consumed_key_chars = 0;
+  }
+  if (!auto_commit_pending_ || live_conversion_frozen_segments_.empty()) {
+    return false;
+  }
+  if (!config::GruConfigManager::IsLiveConversionAutoCommitEnabled(false)) {
+    auto_commit_pending_ = false;
+    return false;
+  }
+
+  std::string committed_value;
+  std::string committed_key;
+  for (const Segment& seg : live_conversion_frozen_segments_) {
+    if (seg.candidates_size() > 0) {
+      committed_value += seg.candidate(0).value;
+      committed_key += seg.key();
+    }
+  }
+
+  if (committed_value.empty()) {
+    auto_commit_pending_ = false;
+    return false;
+  }
+
+  ResetResult();
+  result_.set_type(commands::Result::STRING);
+  result_.set_value(committed_value);
+  result_.set_key(committed_key);
+
+  if (consumed_key_chars) {
+    *consumed_key_chars = Util::CharsLen(live_conversion_frozen_key_);
+  }
+
+  // Submit to converter_ for user history and online learning
+  Segments commit_segments;
+  for (const Segment& seg : live_conversion_frozen_segments_) {
+    Segment* s = commit_segments.add_segment();
+    *s = seg;
+    s->set_segment_type(Segment::SUBMITTED);
+  }
+  std::vector<size_t> cand_indices(commit_segments.conversion_segments_size(), 0);
+  converter_->CommitSegments(&commit_segments, cand_indices);
+
+  ConversionRequest::Options finish_options;
+  ConversionRequest finish_request =
+      ConversionRequestBuilder()
+          .SetRequestView(*request_)
+          .SetContextView(context)
+          .SetConfigView(*config_)
+          .SetOptions(std::move(finish_options))
+          .Build();
+  converter_->FinishConversion(finish_request, &commit_segments);
+
+  live_conversion_frozen_segments_.clear();
+  live_conversion_frozen_key_.clear();
+  auto_commit_pending_ = false;
+
+  return true;
 }
 
 // Sets request type and update the engine_converter's state

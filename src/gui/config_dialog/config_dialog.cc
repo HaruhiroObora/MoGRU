@@ -899,6 +899,12 @@ void ConfigDialog::SetupMogruUi() {
         QString::fromUtf8("通常変換時（スペースキー等）に文節区切り「/」を表示する"));
     showSegmentSeparatorInLiveConversionCheckBox->setText(
         QString::fromUtf8("ライブ変換時にも文節区切り「/」を表示する"));
+    enableLiveConversionPrefixFreezingCheckBox->setText(
+        QString::fromUtf8("指定文字数を超えた場合に前文節を固定（計算量抑制）"));
+    enableLiveConversionAutoCommitCheckBox->setText(
+        QString::fromUtf8("前文節固定の次の更新タイミングで自動確定する"));
+    liveConversionLengthThresholdLabel->setText(
+        QString::fromUtf8("固定・自動確定トリガー文字数:"));
     gruScoreWeightLabel->setText(
         QString::fromUtf8("GRUスコア重み (α / gru_score_weight):"));
 
@@ -978,6 +984,12 @@ void ConfigDialog::LoadGruConfigToUi(const GruPenaltyConfig& gru_config) {
       gru_config.show_segment_separator_in_conversion);
   showSegmentSeparatorInLiveConversionCheckBox->setChecked(
       gru_config.show_segment_separator_in_live_conversion);
+  enableLiveConversionPrefixFreezingCheckBox->setChecked(
+      gru_config.enable_live_conversion_prefix_freezing);
+  enableLiveConversionAutoCommitCheckBox->setChecked(
+      gru_config.enable_live_conversion_auto_commit);
+  liveConversionLengthThresholdSpinBox->setValue(
+      gru_config.live_conversion_length_threshold);
   gruScoreWeightSpinBox->setValue(gru_config.gru_score_weight);
 
   gruModelPathLineEdit->setText(
@@ -1021,6 +1033,12 @@ GruPenaltyConfig ConfigDialog::CollectGruConfigFromUi() const {
       showSegmentSeparatorInConversionCheckBox->isChecked();
   cfg.show_segment_separator_in_live_conversion =
       showSegmentSeparatorInLiveConversionCheckBox->isChecked();
+  cfg.enable_live_conversion_prefix_freezing =
+      enableLiveConversionPrefixFreezingCheckBox->isChecked();
+  cfg.enable_live_conversion_auto_commit =
+      enableLiveConversionAutoCommitCheckBox->isChecked();
+  cfg.live_conversion_length_threshold =
+      liveConversionLengthThresholdSpinBox->value();
   cfg.gru_score_weight = gruScoreWeightSpinBox->value();
 
   cfg.gru_model_path =

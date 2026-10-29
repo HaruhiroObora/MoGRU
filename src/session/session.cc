@@ -1559,6 +1559,15 @@ bool Session::InsertCharacter(commands::Command* command) {
     return Convert(command);
   }
 
+  size_t auto_commit_key_chars = 0;
+  if (context_->mutable_converter()->PopPendingAutoCommit(
+          context_->composer(), command->input().context(),
+          &auto_commit_key_chars)) {
+    if (auto_commit_key_chars > 0) {
+      context_->mutable_composer()->DeleteRange(0, auto_commit_key_chars);
+    }
+  }
+
   if (Suggest(command->input())) {
     Output(command);
     return true;

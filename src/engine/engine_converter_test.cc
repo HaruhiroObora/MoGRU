@@ -5102,5 +5102,197 @@ TEST_F(EngineConverterTest, LiveConversionCommitPreeditAndTrailingN) {
   absl::SetFlag(&FLAGS_enable_live_conversion, false);
 }
 
+TEST_F(EngineConverterTest, LiveConversionPrefixFreezingAndSlashBoundary) {
+  absl::SetFlag(&FLAGS_enable_live_conversion, true);
+  setenv("MOZC_GRU_SHOW_SEGMENT_SEPARATOR_IN_LIVE_CONVERSION", "true", 1);
+  setenv("MOZC_GRU_ENABLE_LIVE_CONVERSION_PREFIX_FREEZING", "true", 1);
+  setenv("MOZC_GRU_ENABLE_LIVE_CONVERSION_AUTO_COMMIT", "false", 1);
+  setenv("MOZC_GRU_LIVE_CONVERSION_LENGTH_THRESHOLD", "6", 1);
+
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+
+  // Type "kyouhatenkiga" ("きょうはてんきが" - 8 kana chars)
+  InsertASCIISequence("kyouhatenkiga", composer_.get());
+
+  Segments segments1;
+  {
+    Segment* seg0 = segments1.add_segment();
+    seg0->set_key("きょうは");
+    converter::Candidate* cand0 = seg0->add_candidate();
+    cand0->value = "今日は";
+    cand0->key = "きょうは";
+    cand0->content_key = "きょうは";
+    cand0->content_value = "今日は";
+
+    Segment* seg1 = segments1.add_segment();
+    seg1->set_key("てんきが");
+    converter::Candidate* cand1 = seg1->add_candidate();
+    cand1->value = "天気が";
+    cand1->key = "てんきが";
+    cand1->content_key = "てんきが";
+    cand1->content_value = "天気が";
+  }
+
+  EXPECT_CALL(*mock_converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments1), Return(true)));
+
+  EXPECT_TRUE(converter.Suggest(*composer_));
+
+  // Verify preedit has full-width slash "／" at the boundary between frozen
+  // "今日は" and active "天気が".
+  {
+    commands::Output output;
+    converter.FillOutput(*composer_, &output);
+    EXPECT_TRUE(output.has_preedit());
+    EXPECT_FALSE(output.has_result());
+    ASSERT_EQ(output.preedit().segment_size(), 3);
+    EXPECT_EQ(output.preedit().segment(0).value(), "今日は");
+    EXPECT_EQ(output.preedit().segment(1).value(), "／");
+    EXPECT_EQ(output.preedit().segment(2).value(), "天気が");
+  }
+
+  // Next keystroke: type "i" -> active key passed to StartConversion should be
+  // only "てんきがい" (4+1=5 chars), NOT "きょうはてんきがい" (9 chars).
+  InsertASCIISequence("i", composer_.get());
+
+  Segments segments2;
+  {
+    Segment* seg0 = segments2.add_segment();
+    seg0->set_key("てんきが");
+    converter::Candidate* cand0 = seg0->add_candidate();
+    cand0->value = "天気が";
+    cand0->key = "てんきが";
+    cand0->content_key = "てんきが";
+    cand0->content_value = "天気が";
+
+    Segment* seg1 = segments2.add_segment();
+    seg1->set_key("い");
+    converter::Candidate* cand1 = seg1->add_candidate();
+    cand1->value = "良";
+    cand1->key = "い";
+    cand1->content_key = "い";
+    cand1->content_value = "良";
+  }
+
+  EXPECT_CALL(*mock_converter, StartConversion(_, _))
+      .WillOnce(DoAll(
+          ::testing::Invoke([](const ConversionRequest& request, Segments* segments) {
+            EXPECT_EQ(request.key(), "てんきがい");
+          }),
+          SetArgPointee<1>(segments2), Return(true)));
+
+  EXPECT_TRUE(converter.Suggest(*composer_));
+
+  {
+    commands::Output output;
+    converter.FillOutput(*composer_, &output);
+    EXPECT_TRUE(output.has_preedit());
+    ASSERT_EQ(output.preedit().segment_size(), 5);
+    EXPECT_EQ(output.preedit().segment(0).value(), "今日は");
+    EXPECT_EQ(output.preedit().segment(1).value(), "／");
+    EXPECT_EQ(output.preedit().segment(2).value(), "天気が");
+    EXPECT_EQ(output.preedit().segment(3).value(), "/");
+    EXPECT_EQ(output.preedit().segment(4).value(), "良");
+  }
+
+  // Commit on Enter -> both frozen and active parts committed.
+  EXPECT_CALL(*mock_converter, CommitSegments(_, _)).WillRepeatedly(Return(true));
+  EXPECT_CALL(*mock_converter, CommitSegmentValue(_, _, _)).WillRepeatedly(Return(true));
+  EXPECT_CALL(*mock_converter, FinishConversion(_, _));
+
+  converter.CommitPreedit(*composer_, Context::default_instance());
+  {
+    commands::Output output;
+    converter.FillOutput(*composer_, &output);
+    EXPECT_TRUE(output.has_result());
+    EXPECT_EQ(output.result().value(), "今日は天気が良");
+    EXPECT_EQ(output.result().key(), "きょうはてんきがい");
+  }
+
+  absl::SetFlag(&FLAGS_enable_live_conversion, false);
+  unsetenv("MOZC_GRU_SHOW_SEGMENT_SEPARATOR_IN_LIVE_CONVERSION");
+  unsetenv("MOZC_GRU_ENABLE_LIVE_CONVERSION_PREFIX_FREEZING");
+  unsetenv("MOZC_GRU_ENABLE_LIVE_CONVERSION_AUTO_COMMIT");
+  unsetenv("MOZC_GRU_LIVE_CONVERSION_LENGTH_THRESHOLD");
+}
+
+TEST_F(EngineConverterTest, LiveConversionPhasedAutoCommit) {
+  absl::SetFlag(&FLAGS_enable_live_conversion, true);
+  setenv("MOZC_GRU_SHOW_SEGMENT_SEPARATOR_IN_LIVE_CONVERSION", "true", 1);
+  setenv("MOZC_GRU_ENABLE_LIVE_CONVERSION_PREFIX_FREEZING", "true", 1);
+  setenv("MOZC_GRU_ENABLE_LIVE_CONVERSION_AUTO_COMMIT", "true", 1);
+  setenv("MOZC_GRU_LIVE_CONVERSION_LENGTH_THRESHOLD", "6", 1);
+
+  auto mock_converter = std::make_shared<MockConverter>();
+  EngineConverter converter(mock_converter, request_, config_);
+
+  // Step 1: Type 8 chars ("きょうはてんきが") -> threshold exceeded.
+  InsertASCIISequence("kyouhatenkiga", composer_.get());
+
+  Segments segments1;
+  {
+    Segment* seg0 = segments1.add_segment();
+    seg0->set_key("きょうは");
+    converter::Candidate* cand0 = seg0->add_candidate();
+    cand0->value = "今日は";
+    cand0->key = "きょうは";
+    cand0->content_key = "きょうは";
+    cand0->content_value = "今日は";
+
+    Segment* seg1 = segments1.add_segment();
+    seg1->set_key("てんきが");
+    converter::Candidate* cand1 = seg1->add_candidate();
+    cand1->value = "天気が";
+    cand1->key = "てんきが";
+    cand1->content_key = "てんきが";
+    cand1->content_value = "天気が";
+  }
+
+  EXPECT_CALL(*mock_converter, StartConversion(_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(segments1), Return(true)));
+
+  EXPECT_TRUE(converter.Suggest(*composer_));
+
+  // First step: NOT committed yet! Preedit shows boundary indicator "／".
+  {
+    commands::Output output;
+    converter.FillOutput(*composer_, &output);
+    EXPECT_FALSE(output.has_result());
+    ASSERT_EQ(output.preedit().segment_size(), 3);
+    EXPECT_EQ(output.preedit().segment(0).value(), "今日は");
+    EXPECT_EQ(output.preedit().segment(1).value(), "／");
+    EXPECT_EQ(output.preedit().segment(2).value(), "天気が");
+  }
+
+  // Step 2: Next keystroke -> PopPendingAutoCommit executes!
+  EXPECT_CALL(*mock_converter, CommitSegments(_, _)).WillRepeatedly(Return(true));
+  EXPECT_CALL(*mock_converter, FinishConversion(_, _));
+
+  size_t consumed_chars = 0;
+  EXPECT_TRUE(converter.PopPendingAutoCommit(*composer_, Context::default_instance(),
+                                             &consumed_chars));
+  EXPECT_EQ(consumed_chars, 4);  // "きょうは" is 4 chars
+
+  // Result has the committed value "今日は"
+  {
+    commands::Output output;
+    converter.PopOutput(*composer_, &output);
+    EXPECT_TRUE(output.has_result());
+    EXPECT_EQ(output.result().value(), "今日は");
+    EXPECT_EQ(output.result().key(), "きょうは");
+  }
+
+  // Delete consumed characters from composer (simulating Session behavior)
+  composer_->DeleteRange(0, consumed_chars);
+  EXPECT_EQ(composer_->GetQueryForPrediction(), "てんきが");
+
+  absl::SetFlag(&FLAGS_enable_live_conversion, false);
+  unsetenv("MOZC_GRU_SHOW_SEGMENT_SEPARATOR_IN_LIVE_CONVERSION");
+  unsetenv("MOZC_GRU_ENABLE_LIVE_CONVERSION_PREFIX_FREEZING");
+  unsetenv("MOZC_GRU_ENABLE_LIVE_CONVERSION_AUTO_COMMIT");
+  unsetenv("MOZC_GRU_LIVE_CONVERSION_LENGTH_THRESHOLD");
+}
+
 }  // namespace engine
 }  // namespace mozc

@@ -1090,6 +1090,9 @@ TEST_F(GruRewriterTest, GruConfigManagerSaveAndLoadAllSettingsRoundTrip) {
   saved.enable_live_conversion = false;
   saved.show_segment_separator_in_conversion = true;
   saved.show_segment_separator_in_live_conversion = true;
+  saved.enable_live_conversion_prefix_freezing = false;
+  saved.enable_live_conversion_auto_commit = true;
+  saved.live_conversion_length_threshold = 36;
   saved.gru_model_path = "/custom/path/grumodel.bin";
   saved.gru_chardata_path = "/custom/path/chardata.bin";
   saved.gru_user_model_path = "/custom/path/grumodel_user.bin";
@@ -1116,6 +1119,9 @@ TEST_F(GruRewriterTest, GruConfigManagerSaveAndLoadAllSettingsRoundTrip) {
   EXPECT_EQ(loaded.enable_live_conversion, false);
   EXPECT_EQ(loaded.show_segment_separator_in_conversion, true);
   EXPECT_EQ(loaded.show_segment_separator_in_live_conversion, true);
+  EXPECT_EQ(loaded.enable_live_conversion_prefix_freezing, false);
+  EXPECT_EQ(loaded.enable_live_conversion_auto_commit, true);
+  EXPECT_EQ(loaded.live_conversion_length_threshold, 36);
   EXPECT_EQ(loaded.gru_model_path, "/custom/path/grumodel.bin");
   EXPECT_EQ(loaded.gru_chardata_path, "/custom/path/chardata.bin");
   EXPECT_EQ(loaded.gru_user_model_path, "/custom/path/grumodel_user.bin");
@@ -1141,6 +1147,16 @@ TEST_F(GruRewriterTest, GruConfigManagerSaveAndLoadAllSettingsRoundTrip) {
   EXPECT_TRUE(
       config::GruConfigManager::IsShowSegmentSeparatorInLiveConversionEnabled(
           false, test_config));
+  EXPECT_FALSE(
+      config::GruConfigManager::IsLiveConversionPrefixFreezingEnabled(
+          true, test_config));
+  EXPECT_TRUE(
+      config::GruConfigManager::IsLiveConversionAutoCommitEnabled(
+          false, test_config));
+  EXPECT_EQ(
+      config::GruConfigManager::GetLiveConversionLengthThreshold(
+          24, test_config),
+      36);
 
   std::filesystem::remove(test_config, ec);
 }
