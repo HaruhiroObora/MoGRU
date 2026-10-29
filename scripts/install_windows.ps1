@@ -14,7 +14,7 @@ Write-Host "Repository Root: $RepoRoot"
 $PrebuiltArg = ""
 for ($i = 0; $i -lt $args.Count; $i++) {
     if ($args[$i] -in @("-h", "--help", "-Help")) {
-        Write-Host "Usage: .\scripts\install_windows.ps1 [ [--binary | -Binary] <path-to-Mozc64.msi-or-zip> ]"
+        Write-Host "Usage: .\scripts\install_windows.ps1 [ [--binary | -Binary] <path-to-MoGRU64.msi-or-zip> ]"
         exit 0
     } elseif ($args[$i] -in @("--binary", "-Binary", "-b")) {
         if ($i + 1 -lt $args.Count) {

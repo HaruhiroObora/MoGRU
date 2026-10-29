@@ -82,9 +82,10 @@ cd MoGRU
 
 > [!TIP]
 > **CIビルド生成物（Artifacts）を利用する場合（Bazel不要・数秒で完了）**:
-> GitHub Actions の `CI for Linux` の実行画面（Artifacts）から `fcitx5-mogru.so` をダウンロード・展開し、引数に指定して実行できます：
+> GitHub Actions の `CI for Linux` の実行画面（Artifacts）から `MoGRU-linux.zip` をダウンロードし、引数に指定して実行できます（Fcitx5プラグイン、MoGRU専用GUI設定ツール `mozc_tool`、全アイコンアセット、モデル重み、デスクトップ設定が自動配置され、システムに標準Mozcパッケージがなくてもスタンドアロンで完全動作します）：
 > ```bash
-> ./install.sh /path/to/fcitx5-mogru.so
+> ./install.sh /path/to/MoGRU-linux.zip
+> # または: ./scripts/install_linux.sh /path/to/MoGRU-linux.zip
 > ```
 
 ### 🍎 macOS
@@ -96,10 +97,10 @@ cd MoGRU
 ```
 > [!TIP]
 > **CIビルド生成物（Artifacts）を利用する場合（Xcode・CMake・Qt・Bazelビルド不要）**:
-> GitHub Actions の `CI for macOS` の実行画面（Artifacts）からパッケージ（`Mozc_arm64.pkg` 等、展開後の `.pkg` または `.zip` のままでも可）をダウンロードし、引数に指定して実行できます（GRUモデル重みと設定ファイルも自動配置されます）：
+> GitHub Actions の `CI for macOS` の実行画面（Artifacts）からパッケージ（`MoGRU_arm64.pkg` 等、展開後の `.pkg` または `.zip` のままでも可）をダウンロードし、引数に指定して実行できます（GRUモデル重みと設定ファイルも自動配置されます）：
 > ```bash
-> ./install.sh /path/to/Mozc.pkg
-> # または: ./scripts/install_macos.sh /path/to/Mozc_arm64.pkg.zip
+> ./install.sh /path/to/MoGRU_arm64.pkg
+> # または: ./scripts/install_macos.sh /path/to/MoGRU_arm64.pkg.zip
 > ```
 
 
@@ -112,10 +113,10 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 ```
 > [!TIP]
 > **CIビルド生成物（Artifacts）を利用する場合（Visual Studio・Bazelビルド不要）**:
-> GitHub Actions の `CI for Windows` の実行画面（Artifacts）からインストーラ（`Mozc64_x64.msi` 等、展開後の `.msi` または `.zip` のままでも可）をダウンロードし、引数に指定して実行できます（GRUモデル重みと設定ファイルも自動配置されます）：
+> GitHub Actions の `CI for Windows` の実行画面（Artifacts）からインストーラ（`MoGRU64_x64.msi` 等、展開後の `.msi` または `.zip` のままでも可）をダウンロードし、引数に指定して実行できます（GRUモデル重みと設定ファイルも自動配置されます）：
 > ```powershell
-> .\scripts\install_windows.ps1 C:\path\to\Mozc64.msi
-> # Git Bash からは ./install.sh /c/path/to/Mozc64.msi でも実行可能
+> .\scripts\install_windows.ps1 C:\path\to\MoGRU64_x64.msi
+> # Git Bash からは ./install.sh /c/path/to/MoGRU64_x64.msi でも実行可能
 > ```
 
 ---

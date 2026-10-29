@@ -39,14 +39,72 @@ jobs:
         working-directory: ./src
         run: |
           bazelisk build package --config release_build
-          bazelisk build -c opt //unix/fcitx5:fcitx5-mogru.so //unix/fcitx5:fcitx5-mozc-gru.so --//unix/fcitx5:use_server=False
+          bazelisk build -c opt //unix/fcitx5:fcitx5-mogru.so //unix/fcitx5:fcitx5-mozc-gru.so //gui/tool:mozc_tool --//unix/fcitx5:use_server=False
 
-      - name: Upload Artifacts
+      - name: Prepare MoGRU Linux Package
+        run: |
+          mkdir -p package_linux/icons/hicolor/128x128/apps
+          mkdir -p package_linux/icons/hicolor/48x48/apps
+          mkdir -p package_linux/icons/hicolor/32x32/apps
+          mkdir -p package_linux/icons/mozc
+          mkdir -p package_linux/models
+
+          # 既存 package (旧 mozc.zip) の全成果物を展開
+          unzip -q src/bazel-bin/unix/mozc.zip -d package_linux/
+
+          # fcitx5-mogru.so を追加（ルート直下および usr/lib/fcitx5 配下）
+          cp -f src/bazel-bin/unix/fcitx5/fcitx5-mogru.so package_linux/
+          mkdir -p package_linux/usr/lib/fcitx5
+          cp -f src/bazel-bin/unix/fcitx5/fcitx5-mogru.so package_linux/usr/lib/fcitx5/
+
+          # mozc_tool をルート直下にコピー
+          cp -f src/bazel-bin/gui/tool/mozc_tool package_linux/
+
+          # モデルファイル
+          cp -f models/grumodel.bin package_linux/models/ 2>/dev/null || true
+          cp -f models/chardata.bin package_linux/models/ 2>/dev/null || true
+          cp -f models/gru_config.ini package_linux/models/ 2>/dev/null || true
+
+          # アイコンアセット（128x128）
+          cp -f src/data/images/product_icon_32bpp-128.png package_linux/icons/hicolor/128x128/apps/fcitx_mozc.png
+          cp -f src/data/images/product_icon_32bpp-128.png package_linux/icons/hicolor/128x128/apps/fcitx-mozc.png
+          cp -f src/data/images/product_icon_32bpp-128.png package_linux/icons/hicolor/128x128/apps/fcitx_mogru.png
+          cp -f src/data/images/product_icon_32bpp-128.png package_linux/icons/hicolor/128x128/apps/mogru.png
+
+          # アイコンアセット（32x32）
+          cp -f src/data/images/unix/ime_product_icon_opensource-32.png package_linux/icons/hicolor/32x32/apps/fcitx_mozc.png
+          cp -f src/data/images/unix/ime_product_icon_opensource-32.png package_linux/icons/hicolor/32x32/apps/fcitx-mozc.png
+          cp -f src/data/images/unix/ime_product_icon_opensource-32.png package_linux/icons/hicolor/32x32/apps/fcitx_mogru.png
+          cp -f src/data/images/unix/ime_product_icon_opensource-32.png package_linux/icons/hicolor/32x32/apps/mogru.png
+          cp -f src/data/images/unix/ime_product_icon_opensource-32.png package_linux/icons/hicolor/32x32/apps/org.fcitx.Fcitx5.fcitx_mozc.png
+
+          # アイコンアセット（48x48）
+          for mode in direct hiragana katakana_full katakana_half alpha_full alpha_half; do
+            if [ -f "src/data/images/unix/48x48/${mode}.png" ]; then
+              cp -f "src/data/images/unix/48x48/${mode}.png" "package_linux/icons/hicolor/48x48/apps/fcitx_mozc_${mode}.png"
+              cp -f "src/data/images/unix/48x48/${mode}.png" "package_linux/icons/hicolor/48x48/apps/fcitx_mogru_${mode}.png"
+            fi
+          done
+
+          # ツールメニュー用アイコン（48x48）
+          cp -f src/data/images/unix/ui-tool.png package_linux/icons/hicolor/48x48/apps/fcitx_mozc_tool.png
+          cp -f src/data/images/unix/ui-properties.png package_linux/icons/hicolor/48x48/apps/fcitx_mozc_properties.png
+          cp -f src/data/images/unix/ui-dictionary.png package_linux/icons/hicolor/48x48/apps/fcitx_mozc_dictionary.png
+
+          # mozc 互換アイコン
+          cp -f src/data/images/product_icon_32bpp-128.png package_linux/icons/mozc/product_icon_32bpp-128.png
+          cp -f src/data/images/unix/ime_product_icon_opensource-32.png package_linux/icons/mozc/ime_product_icon_opensource-32.png
+          cp -f src/data/images/unix/ui-*.png package_linux/icons/mozc/ 2>/dev/null || true
+
+          # zip アーカイブ作成
+          cd package_linux && zip -r ../MoGRU-linux.zip .
+
+      - name: Upload MoGRU Linux Artifact
         if: github.event_name == 'push'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: mozc.zip
-          path: src/bazel-bin/unix/mozc.zip
+          name: MoGRU-linux.zip
+          path: MoGRU-linux.zip
           if-no-files-found: warn
 
       - name: Upload fcitx5-mogru Artifact

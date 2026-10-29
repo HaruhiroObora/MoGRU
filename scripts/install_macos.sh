@@ -19,7 +19,7 @@ fi
 PREBUILT_ARG=""
 if [ $# -ge 1 ]; then
   if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
-    echo "Usage: $0 [ [--binary] <path-to-Mozc.pkg-or-zip> ]"
+    echo "Usage: $0 [ [--binary] <path-to-MoGRU.pkg-or-zip> ]"
     exit 0
   elif [ "$1" = "--binary" ]; then
     if [ $# -lt 2 ]; then
