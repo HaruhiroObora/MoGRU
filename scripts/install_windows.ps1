@@ -29,6 +29,15 @@ for ($i = 0; $i -lt $args.Count; $i++) {
     }
 }
 
+if (-not $PrebuiltArg) {
+    # Auto-detection when run without arguments inside an extracted standalone package
+    $LocalMsi = Get-ChildItem -Path $ScriptDir -Filter "*.msi" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($LocalMsi) {
+        $PrebuiltArg = $LocalMsi.FullName
+        Write-Host "[+] Auto-detected standalone MSI installer in script directory: $($LocalMsi.Name)" -ForegroundColor Green
+    }
+}
+
 # 1. Check Administrator Rights (recommended for MSI installation)
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
@@ -174,10 +183,16 @@ try {
     }
 }
 
-# 6. Copy GRU model files to AppData\LocalLow\Mozc and AppData\LocalLow\Google\JapaneseInput
-$ModelSrc = Join-Path $RepoRoot "models\grumodel.bin"
-$ChardataSrc = Join-Path $RepoRoot "models\chardata.bin"
-$ConfigSrc = Join-Path $RepoRoot "models\gru_config.ini"
+# 6. Copy GRU model files to AppData\LocalLow\MoGRU
+$ModelSrc = Join-Path $ScriptDir "models\grumodel.bin"
+$ChardataSrc = Join-Path $ScriptDir "models\chardata.bin"
+$ConfigSrc = Join-Path $ScriptDir "models\gru_config.ini"
+
+if (-not (Test-Path $ModelSrc)) {
+    $ModelSrc = Join-Path $RepoRoot "models\grumodel.bin"
+    $ChardataSrc = Join-Path $RepoRoot "models\chardata.bin"
+    $ConfigSrc = Join-Path $RepoRoot "models\gru_config.ini"
+}
 
 $TargetDirs = @(
     (Join-Path $env:USERPROFILE "AppData\LocalLow\MoGRU")

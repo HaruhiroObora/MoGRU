@@ -65,10 +65,44 @@ macOS 標準日本語入力でおなじみの「**ライブ変換**」を MoGRU 
 
 ---
 
-## クイックスタート（各OSでのビルド & インストール）
+## クイックインストール（推奨・Gitクローン/ビルド不要）
 
-リポジトリをクローンした後、お使いのOSに応じたスクリプトを実行するだけでビルド・インストールが完了します。
-モデル重みファイル（`grumodel.bin`, `chardata.bin`）も自動配置されます。
+GitHub Releases または GitHub Actions の実行画面（Artifacts）からお使いの OS に応じたパッケージ（zip）をダウンロードして展開し、同梱のインストールスクリプトを実行するだけで数秒でインストールが完了します。
+リポジトリのクローン（`git clone`）やビルド環境（Bazel / C++コンパイラ等）は一切不要です。
+モデル重みファイル（`grumodel.bin`, `chardata.bin`）やアイコン、設定ファイルも自動配置されます。
+
+### 🐧 Linux (Fcitx5)
+1. `MoGRU-linux.zip` をダウンロードして展開します。
+2. 展開したディレクトリでスクリプトを実行します：
+```bash
+cd MoGRU-linux
+./install.sh
+```
+> [!NOTE]
+> Fcitx5 プラグイン、MoGRU 専用 GUI 設定ツール（`mozc_tool`）、全アイコン、モデル重み、デスクトップ設定が自動配置されます。システム標準の Mozc パッケージ（`mozc-data` 等）が一切インストールされていない環境でもスタンドアロンで完全動作します。
+
+### 🍎 macOS
+1. `MoGRU-macOS-arm64.zip`（Intel Mac の場合は `MoGRU-macOS-intel64.zip`）をダウンロードして展開します。
+2. 展開したディレクトリでスクリプトを実行します：
+```bash
+cd MoGRU-macOS-arm64
+./install.sh
+```
+
+### 🪟 Windows (PowerShell)
+1. `MoGRU-windows-x64.zip` をダウンロードして展開します。
+2. PowerShell を管理者権限で開き、展開したディレクトリでスクリプトを実行します：
+```powershell
+cd MoGRU-windows-x64
+Set-ExecutionPolicy Bypass -Scope Process -Force
+.\install.ps1
+```
+
+---
+
+## 🛠️ ソースコードから自前ビルドする場合（開発者向け）
+
+ソースコードから自前でビルド・開発したい場合は、リポジトリをクローンして各 OS のビルドスクリプトを実行してください：
 
 ### 🐧 Linux (Fcitx5)
 ```bash
@@ -78,15 +112,7 @@ cd MoGRU
 # または: ./scripts/install_linux.sh
 ```
 > [!NOTE]
-> ソースからビルドする場合、Fcitx5 開発ヘッダーおよび GUI 設定ツール用の Qt6（`qt6-base-dev` 等）が必要ですが、未インストールの場合はスクリプト初回実行時に自動でインストール案内が表示されます。
-
-> [!TIP]
-> **CIビルド生成物（Artifacts）を利用する場合（Bazel不要・数秒で完了）**:
-> GitHub Actions の `CI for Linux` の実行画面（Artifacts）から `MoGRU-linux.zip` をダウンロードし、引数に指定して実行できます（Fcitx5プラグイン、MoGRU専用GUI設定ツール `mozc_tool`、全アイコンアセット、モデル重み、デスクトップ設定が自動配置され、システムに標準Mozcパッケージがなくてもスタンドアロンで完全動作します）：
-> ```bash
-> ./install.sh /path/to/MoGRU-linux.zip
-> # または: ./scripts/install_linux.sh /path/to/MoGRU-linux.zip
-> ```
+> Fcitx5 開発ヘッダーおよび GUI 設定ツール用の Qt6（`qt6-base-dev` 等）が必要ですが、未インストールの場合はスクリプト初回実行時に自動でパッケージマネージャのインストール案内が表示されます。
 
 ### 🍎 macOS
 ```bash
@@ -95,14 +121,6 @@ cd MoGRU
 ./install.sh
 # または: ./scripts/install_macos.sh
 ```
-> [!TIP]
-> **CIビルド生成物（Artifacts）を利用する場合（Xcode・CMake・Qt・Bazelビルド不要）**:
-> GitHub Actions の `CI for macOS` の実行画面（Artifacts）からパッケージ（`MoGRU_arm64.pkg` 等、展開後の `.pkg` または `.zip` のままでも可）をダウンロードし、引数に指定して実行できます（GRUモデル重みと設定ファイルも自動配置されます）：
-> ```bash
-> ./install.sh /path/to/MoGRU_arm64.pkg
-> # または: ./scripts/install_macos.sh /path/to/MoGRU_arm64.pkg.zip
-> ```
-
 
 ### 🪟 Windows (PowerShell)
 ```powershell
@@ -111,13 +129,6 @@ cd MoGRU
 Set-ExecutionPolicy Bypass -Scope Process -Force
 .\scripts\install_windows.ps1
 ```
-> [!TIP]
-> **CIビルド生成物（Artifacts）を利用する場合（Visual Studio・Bazelビルド不要）**:
-> GitHub Actions の `CI for Windows` の実行画面（Artifacts）からインストーラ（`MoGRU64_x64.msi` 等、展開後の `.msi` または `.zip` のままでも可）をダウンロードし、引数に指定して実行できます（GRUモデル重みと設定ファイルも自動配置されます）：
-> ```powershell
-> .\scripts\install_windows.ps1 C:\path\to\MoGRU64_x64.msi
-> # Git Bash からは ./install.sh /c/path/to/MoGRU64_x64.msi でも実行可能
-> ```
 
 ---
 

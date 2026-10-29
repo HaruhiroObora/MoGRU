@@ -14,6 +14,7 @@ PREBUILT_ARG=""
 if [ $# -ge 1 ]; then
   if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
     echo "Usage: $0 [ [--binary] <path-to-MoGRU-linux.zip-or-so> ]"
+    echo "       (When run inside extracted MoGRU package, arguments can be omitted)"
     exit 0
   elif [ "$1" = "--binary" ]; then
     if [ $# -lt 2 ]; then
@@ -23,6 +24,15 @@ if [ $# -ge 1 ]; then
     PREBUILT_ARG="$2"
   else
     PREBUILT_ARG="$1"
+  fi
+else
+  # Auto-detection when run without arguments inside an extracted standalone package
+  if [ -f "$SCRIPT_DIR/fcitx5-mogru.so" ]; then
+    PREBUILT_ARG="$SCRIPT_DIR"
+    echo "[+] Auto-detected standalone package in script directory: $SCRIPT_DIR"
+  elif [ -f "./fcitx5-mogru.so" ]; then
+    PREBUILT_ARG="."
+    echo "[+] Auto-detected standalone package in current directory."
   fi
 fi
 

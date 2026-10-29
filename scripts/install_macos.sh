@@ -20,6 +20,7 @@ PREBUILT_ARG=""
 if [ $# -ge 1 ]; then
   if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
     echo "Usage: $0 [ [--binary] <path-to-MoGRU.pkg-or-zip> ]"
+    echo "       (When run inside extracted MoGRU package, arguments can be omitted)"
     exit 0
   elif [ "$1" = "--binary" ]; then
     if [ $# -lt 2 ]; then
@@ -29,6 +30,17 @@ if [ $# -ge 1 ]; then
     PREBUILT_ARG="$2"
   else
     PREBUILT_ARG="$1"
+  fi
+else
+  # Auto-detection when run without arguments inside an extracted standalone package
+  FOUND_LOCAL_PKG="$(find "$SCRIPT_DIR" -maxdepth 2 -name "*.pkg" -print -quit 2>/dev/null || true)"
+  FOUND_LOCAL_APP="$(find "$SCRIPT_DIR" -maxdepth 2 -name "*.app" -type d -print -quit 2>/dev/null || true)"
+  if [ -n "$FOUND_LOCAL_PKG" ]; then
+    PREBUILT_ARG="$FOUND_LOCAL_PKG"
+    echo "[+] Auto-detected standalone package in script directory: $FOUND_LOCAL_PKG"
+  elif [ -n "$FOUND_LOCAL_APP" ]; then
+    PREBUILT_ARG="$FOUND_LOCAL_APP"
+    echo "[+] Auto-detected standalone app in script directory: $FOUND_LOCAL_APP"
   fi
 fi
 
@@ -167,22 +179,31 @@ fi
 echo "=== Installing MoGRU ==="
 
 # Copy GRU model files and default configuration to user profile directory
+SOURCE_MODELS_DIR=""
+if [ -f "$REPO_ROOT/models/grumodel.bin" ] && [ -f "$REPO_ROOT/models/chardata.bin" ]; then
+  SOURCE_MODELS_DIR="$REPO_ROOT/models"
+elif [ -f "$SCRIPT_DIR/models/grumodel.bin" ] && [ -f "$SCRIPT_DIR/models/chardata.bin" ]; then
+  SOURCE_MODELS_DIR="$SCRIPT_DIR/models"
+fi
+
 for dir in \
   "$HOME/Library/Application Support/MoGRU" \
   "$HOME/.config/mogru"; do
   mkdir -p "$dir"
-  if [ -f "$REPO_ROOT/models/grumodel.bin" ] && [ -f "$REPO_ROOT/models/chardata.bin" ]; then
-    cp -f "$REPO_ROOT/models/grumodel.bin" "$dir/"
-    cp -f "$REPO_ROOT/models/chardata.bin" "$dir/"
+  if [ -n "$SOURCE_MODELS_DIR" ]; then
+    cp -f "$SOURCE_MODELS_DIR/grumodel.bin" "$dir/"
+    cp -f "$SOURCE_MODELS_DIR/chardata.bin" "$dir/"
   fi
   TARGET_INI="$dir/gru_config.ini"
-  if [ ! -f "$TARGET_INI" ] && [ -f "$REPO_ROOT/models/gru_config.ini" ]; then
+  if [ ! -f "$TARGET_INI" ] && [ -n "$SOURCE_MODELS_DIR" ] && [ -f "$SOURCE_MODELS_DIR/gru_config.ini" ]; then
     echo "[+] Initializing $TARGET_INI from default template ..."
-    cp "$REPO_ROOT/models/gru_config.ini" "$TARGET_INI"
+    cp "$SOURCE_MODELS_DIR/gru_config.ini" "$TARGET_INI"
   elif [ -f "$TARGET_INI" ] && (grep -q "katakana_penalty" "$TARGET_INI" || ! grep -q "enable_live_conversion" "$TARGET_INI"); then
     echo "[+] Upgrading $TARGET_INI to unified MoGRU config format (backup saved to $TARGET_INI.bak) ..."
     cp "$TARGET_INI" "$TARGET_INI.bak"
-    cp "$REPO_ROOT/models/gru_config.ini" "$TARGET_INI"
+    if [ -n "$SOURCE_MODELS_DIR" ] && [ -f "$SOURCE_MODELS_DIR/gru_config.ini" ]; then
+      cp "$SOURCE_MODELS_DIR/gru_config.ini" "$TARGET_INI"
+    fi
   fi
 done
 echo "[+] GRU model files and configuration installed to Application Support and ~/.config/mogru/"

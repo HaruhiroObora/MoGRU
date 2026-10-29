@@ -96,6 +96,10 @@ jobs:
           cp -f src/data/images/unix/ime_product_icon_opensource-32.png package_linux/icons/mozc/ime_product_icon_opensource-32.png
           cp -f src/data/images/unix/ui-*.png package_linux/icons/mozc/ 2>/dev/null || true
 
+          # スタンドアロンインストーラスクリプトの同梱
+          cp -f scripts/install_linux.sh package_linux/install.sh
+          chmod 755 package_linux/install.sh
+
           # zip アーカイブ作成
           cd package_linux && zip -r ../MoGRU-linux.zip .
 
