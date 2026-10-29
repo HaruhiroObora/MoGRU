@@ -93,24 +93,41 @@ try {
         }
         Write-Host "[+] Using Bazel: $BazelBin" -ForegroundColor Green
 
-        # 3. Check Visual Studio C++ Environment
-        $VSWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-        if (Test-Path $VSWhere) {
-            $VSPath = & $VSWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-            if ($VSPath) {
-                Write-Host "[+] Found Visual Studio at: $VSPath" -ForegroundColor Green
-            } else {
-                Write-Warning "Visual Studio with C++ tools was not detected. Ensure 'Desktop development with C++' is installed."
+        # 3. Check .NET SDK (required for 'dotnet tool restore')
+        if (-not (Get-Command "dotnet" -ErrorAction SilentlyContinue)) {
+            Write-Host "[!] .NET SDK (dotnet CLI) not found in PATH." -ForegroundColor Yellow
+            Write-Host "    Attempting to install .NET SDK via winget..."
+            if (Get-Command "winget" -ErrorAction SilentlyContinue) {
+                winget install --id Microsoft.DotNet.SDK.8 -e --accept-source-agreements --accept-package-agreements
+                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+            }
+            if (-not (Get-Command "dotnet" -ErrorAction SilentlyContinue)) {
+                Write-Error ".NET 6.0 or later SDK is required. Please install it (e.g. winget install Microsoft.DotNet.SDK.8) and rerun this script."
+                exit 1
             }
         }
+        Write-Host "[+] Using .NET SDK: $(dotnet --version)" -ForegroundColor Green
 
-        # 4. Check Python (required to build Qt & update dependencies)
+        # 4. Check Visual Studio C++ Environment
+        $VSWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        if (-not (Test-Path $VSWhere)) {
+            Write-Error "Visual Studio Installer (vswhere.exe) was not found at '$VSWhere'. Please install Visual Studio 2022 Community (or Build Tools) with 'Desktop development with C++'."
+            exit 1
+        }
+        $VSPath = & $VSWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        if (-not $VSPath) {
+            Write-Error "Visual Studio with C++ tools was not detected. Please ensure 'Desktop development with C++' (including MSVC v143 build tools and C++ ATL) is installed."
+            exit 1
+        }
+        Write-Host "[+] Found Visual Studio at: $VSPath" -ForegroundColor Green
+
+        # 5. Check Python (required to build Qt & update dependencies)
         if (-not (Get-Command "python" -ErrorAction SilentlyContinue)) {
             Write-Error "Python 3 is required to prepare dependencies and build Qt. Please install Python and add it to PATH."
             exit 1
         }
 
-        # 5. Build Qt if not already present
+        # 6. Build Qt if not already present
         if (-not (Test-Path "$RepoRoot\src\third_party\qt")) {
             Write-Host "=== Step 1/2: Downloading dependencies & Building Qt for Windows ===" -ForegroundColor Cyan
             Write-Host "Note: Building Qt may take several minutes on the first run." -ForegroundColor Yellow
@@ -119,14 +136,14 @@ try {
             & python build_tools\build_qt.py --release --confirm_license
         }
 
-        # 6. Build Mozc Installer for Windows
-        Write-Host "=== Step 2/2: Building Mozc Installer (-c opt) ===" -ForegroundColor Cyan
+        # 7. Build Mozc Installer for Windows
+        Write-Host "=== Step 2/2: Building Mozc Installer (--config release_build) ===" -ForegroundColor Cyan
         Set-Location -Path "$RepoRoot\src"
 
         # Execute Bazel build
-        & $BazelBin build -c opt //win32/installer:installer_oss
+        & $BazelBin build package --config release_build
 
-        $MsiPath = "$RepoRoot\src\bazel-bin\win32\installer\mozc64.msi"
+        $MsiPath = "$RepoRoot\src\bazel-bin\win32\installer\Mozc64.msi"
         if (-not (Test-Path $MsiPath)) {
             # Check alternate naming
             $MsiFiles = Get-ChildItem -Path "$RepoRoot\src\bazel-bin\win32\installer" -Filter "*.msi" -ErrorAction SilentlyContinue

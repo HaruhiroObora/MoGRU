@@ -38,6 +38,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <iterator>
 #include <memory>
 #include <optional>
@@ -78,6 +79,22 @@ ABSL_DECLARE_FLAG(bool, enable_live_conversion);
 namespace mozc {
 namespace engine {
 namespace {
+
+#if defined(_WIN32)
+inline int setenv(const char* name, const char* value, int overwrite) {
+  if (!overwrite) {
+    size_t envsize = 0;
+    if (_dupenv_s(nullptr, &envsize, name) == 0 && envsize > 0) {
+      return 0;
+    }
+  }
+  return _putenv_s(name, value);
+}
+
+inline int unsetenv(const char* name) {
+  return _putenv_s(name, "");
+}
+#endif
 
 using ::mozc::commands::Context;
 using ::mozc::commands::Request;
