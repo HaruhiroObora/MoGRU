@@ -8,9 +8,16 @@ MoGRU components.
 
 1. Install GitHub CLI (`gh`) and authenticate it with `gh auth login`.
 2. Enable GitHub Actions once in the `Harumaru169/MoGRU` fork's Actions page.
-3. Clone `Harumaru169/MoGRU` and check out the development branch.
-4. Install MoGRU once and select it in macOS Input Sources. The first
-   registration may require logging out and back in.
+3. Clone the fork and check out the development branch:
+
+   ```sh
+   gh repo clone Harumaru169/MoGRU
+   cd MoGRU
+   git switch feature/swiftui-candidate-renderer
+   ```
+
+4. Run `./scripts/dev-install-macos.sh` once, then select MoGRU in macOS Input
+   Sources. The first registration may require logging out and back in.
 
 The application is built by GitHub Actions. No local Bazel, Qt, or full Xcode
 installation is required for the update loop.

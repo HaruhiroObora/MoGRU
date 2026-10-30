@@ -28,6 +28,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <Carbon/Carbon.h>
+#include <Cocoa/Cocoa.h>
 #include <objc/message.h>
 
 #include <cmath>
@@ -36,6 +37,7 @@
 
 #include "absl/log/log.h"
 #include "base/coordinates.h"
+#include "client/client_interface.h"
 #include "protocol/commands.pb.h"
 #include "renderer/mac/CandidateWindow.h"
 

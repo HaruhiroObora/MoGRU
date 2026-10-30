@@ -20,7 +20,8 @@ cd "$repo_root"
 ci_repo="Harumaru169/MoGRU"
 remote_url="$(git remote get-url origin)"
 case "$remote_url" in
-  git@github.com:Harumaru169/MoGRU.git|https://github.com/Harumaru169/MoGRU.git) ;;
+  git@github.com:Harumaru169/MoGRU|git@github.com:Harumaru169/MoGRU.git|\
+  https://github.com/Harumaru169/MoGRU|https://github.com/Harumaru169/MoGRU.git) ;;
   *) echo "Unexpected origin: $remote_url" >&2; exit 1 ;;
 esac
 
