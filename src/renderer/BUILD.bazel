@@ -287,7 +287,6 @@ swift_library(
     srcs = ["mac/MoGRUCandidateView.swift"],
     generated_header_name = "MoGRUCandidateUI-Swift.h",
     generates_header = True,
-    sdk_frameworks = ["AppKit", "SwiftUI"],
     target_compatible_with = ["@platforms//os:macos"],
 )
 
@@ -344,6 +343,7 @@ mozc_objc_library(
         "Carbon",
         "Cocoa",
         "Foundation",
+        "SwiftUI",
     ],
     deps = [
         ":mozc_candidate_ui_macos",
