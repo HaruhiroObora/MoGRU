@@ -38,6 +38,8 @@
 #if defined(_WIN32) || defined(_MSC_VER)
 #include <intrin.h>
 #endif
+#elif defined(__aarch64__) || defined(_M_ARM64)
+#include <arm_neon.h>
 #endif
 
 namespace gruscorer::math
@@ -240,12 +242,205 @@ inline void GemvAvx2Fma(const float *W, const float *x, const float *b, float *y
 }
 #endif
 
+#if defined(__aarch64__) || defined(_M_ARM64)
+/**
+ * @brief ARM NEON DotProduct implementation using 16-float unrolling with FMA: dot = a · b
+ */
+inline float DotProductNeon(const float *a, const float *b, size_t n) noexcept
+{
+    size_t i = 0;
+    float32x4_t acc0 = vdupq_n_f32(0.0f);
+    float32x4_t acc1 = vdupq_n_f32(0.0f);
+    float32x4_t acc2 = vdupq_n_f32(0.0f);
+    float32x4_t acc3 = vdupq_n_f32(0.0f);
+
+    for (; i + 16 <= n; i += 16)
+    {
+        acc0 = vfmaq_f32(acc0, vld1q_f32(&a[i + 0]), vld1q_f32(&b[i + 0]));
+        acc1 = vfmaq_f32(acc1, vld1q_f32(&a[i + 4]), vld1q_f32(&b[i + 4]));
+        acc2 = vfmaq_f32(acc2, vld1q_f32(&a[i + 8]), vld1q_f32(&b[i + 8]));
+        acc3 = vfmaq_f32(acc3, vld1q_f32(&a[i + 12]), vld1q_f32(&b[i + 12]));
+    }
+    for (; i + 4 <= n; i += 4)
+    {
+        acc0 = vfmaq_f32(acc0, vld1q_f32(&a[i]), vld1q_f32(&b[i]));
+    }
+
+    float32x4_t sum_vec = vaddq_f32(vaddq_f32(acc0, acc1), vaddq_f32(acc2, acc3));
+    float total = vaddvq_f32(sum_vec);
+
+    for (; i < n; ++i)
+    {
+        total += a[i] * b[i];
+    }
+    return total;
+}
+
+/**
+ * @brief High-throughput Matrix-vector product using 4-row register tiling with ARM NEON: y = W * x + b
+ */
+inline void GemvNeon(const float *W, const float *x, const float *b, float *y, size_t rows, size_t cols) noexcept
+{
+    size_t r = 0;
+
+    for (; r + 4 <= rows; r += 4)
+    {
+        const float *w0 = &W[(r + 0) * cols];
+        const float *w1 = &W[(r + 1) * cols];
+        const float *w2 = &W[(r + 2) * cols];
+        const float *w3 = &W[(r + 3) * cols];
+
+        float32x4_t acc0 = vdupq_n_f32(0.0f);
+        float32x4_t acc1 = vdupq_n_f32(0.0f);
+        float32x4_t acc2 = vdupq_n_f32(0.0f);
+        float32x4_t acc3 = vdupq_n_f32(0.0f);
+
+        size_t c = 0;
+        for (; c + 4 <= cols; c += 4)
+        {
+            float32x4_t vx = vld1q_f32(&x[c]);
+            acc0 = vfmaq_f32(acc0, vld1q_f32(&w0[c]), vx);
+            acc1 = vfmaq_f32(acc1, vld1q_f32(&w1[c]), vx);
+            acc2 = vfmaq_f32(acc2, vld1q_f32(&w2[c]), vx);
+            acc3 = vfmaq_f32(acc3, vld1q_f32(&w3[c]), vx);
+        }
+
+        float s0 = vaddvq_f32(acc0);
+        float s1 = vaddvq_f32(acc1);
+        float s2 = vaddvq_f32(acc2);
+        float s3 = vaddvq_f32(acc3);
+
+        for (; c < cols; ++c)
+        {
+            const float xc = x[c];
+            s0 += w0[c] * xc;
+            s1 += w1[c] * xc;
+            s2 += w2[c] * xc;
+            s3 += w3[c] * xc;
+        }
+
+        if (b != nullptr)
+        {
+            s0 += b[r + 0];
+            s1 += b[r + 1];
+            s2 += b[r + 2];
+            s3 += b[r + 3];
+        }
+
+        y[r + 0] = s0;
+        y[r + 1] = s1;
+        y[r + 2] = s2;
+        y[r + 3] = s3;
+    }
+
+    for (; r < rows; ++r)
+    {
+        const float *wr = &W[r * cols];
+        float32x4_t acc = vdupq_n_f32(0.0f);
+        size_t c = 0;
+        for (; c + 4 <= cols; c += 4)
+        {
+            acc = vfmaq_f32(acc, vld1q_f32(&wr[c]), vld1q_f32(&x[c]));
+        }
+        float s = vaddvq_f32(acc);
+        for (; c < cols; ++c)
+        {
+            s += wr[c] * x[c];
+        }
+        if (b != nullptr)
+        {
+            s += b[r];
+        }
+        y[r] = s;
+    }
+}
+
+inline void AxpyNeon(float alpha, const float *x, float *y, size_t n) noexcept
+{
+    size_t i = 0;
+    float32x4_t valpha = vdupq_n_f32(alpha);
+    for (; i + 16 <= n; i += 16)
+    {
+        float32x4_t vy0 = vld1q_f32(&y[i + 0]);
+        float32x4_t vy1 = vld1q_f32(&y[i + 4]);
+        float32x4_t vy2 = vld1q_f32(&y[i + 8]);
+        float32x4_t vy3 = vld1q_f32(&y[i + 12]);
+
+        vy0 = vfmaq_f32(vy0, valpha, vld1q_f32(&x[i + 0]));
+        vy1 = vfmaq_f32(vy1, valpha, vld1q_f32(&x[i + 4]));
+        vy2 = vfmaq_f32(vy2, valpha, vld1q_f32(&x[i + 8]));
+        vy3 = vfmaq_f32(vy3, valpha, vld1q_f32(&x[i + 12]));
+
+        vst1q_f32(&y[i + 0], vy0);
+        vst1q_f32(&y[i + 4], vy1);
+        vst1q_f32(&y[i + 8], vy2);
+        vst1q_f32(&y[i + 12], vy3);
+    }
+    for (; i + 4 <= n; i += 4)
+    {
+        float32x4_t vy = vld1q_f32(&y[i]);
+        vy = vfmaq_f32(vy, valpha, vld1q_f32(&x[i]));
+        vst1q_f32(&y[i], vy);
+    }
+    for (; i < n; ++i)
+    {
+        y[i] += alpha * x[i];
+    }
+}
+
+inline float ComputeLogSumExpNeon(const float *in, size_t n) noexcept
+{
+    if (n == 0) return 0.0f;
+
+    size_t i = 0;
+    float32x4_t max_vec = vdupq_n_f32(in[0]);
+    for (; i + 4 <= n; i += 4)
+    {
+        max_vec = vmaxq_f32(max_vec, vld1q_f32(&in[i]));
+    }
+    float max_val = vmaxvq_f32(max_vec);
+    for (; i < n; ++i)
+    {
+        if (in[i] > max_val)
+        {
+            max_val = in[i];
+        }
+    }
+
+    float sum_exp = 0.0f;
+    for (size_t j = 0; j < n; ++j)
+    {
+        sum_exp += std::exp(in[j] - max_val);
+    }
+    return max_val + std::log(sum_exp);
+}
+
+inline void LogSoftmaxNeon(const float *in, float *out, size_t n, float log_denom) noexcept
+{
+    size_t i = 0;
+    float32x4_t vdenom = vdupq_n_f32(log_denom);
+    for (; i + 4 <= n; i += 4)
+    {
+        vst1q_f32(&out[i], vsubq_f32(vld1q_f32(&in[i]), vdenom));
+    }
+    for (; i < n; ++i)
+    {
+        out[i] = in[i] - log_denom;
+    }
+}
+#endif
+
 inline float DotProduct(const float *a, const float *b, size_t n) noexcept
 {
 #if defined(__x86_64__) || defined(_M_X64)
     if (HasAvx2Fma() && n >= 8)
     {
         return DotProductAvx2Fma(a, b, n);
+    }
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    if (n >= 4)
+    {
+        return DotProductNeon(a, b, n);
     }
 #endif
     return DotProductScalar(a, b, n);
@@ -276,6 +471,12 @@ inline void Gemv(const float *W, const float *x, const float *b, float *y, size_
     if (HasAvx2Fma() && cols >= 8)
     {
         GemvAvx2Fma(W, x, b, y, rows, cols);
+        return;
+    }
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    if (cols >= 4)
+    {
+        GemvNeon(W, x, b, y, rows, cols);
         return;
     }
 #endif
@@ -325,6 +526,12 @@ inline void Axpy(float alpha, const float *x, float *y, size_t n) noexcept
     if (HasAvx2Fma() && n >= 8)
     {
         AxpyAvx2Fma(alpha, x, y, n);
+        return;
+    }
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    if (n >= 4)
+    {
+        AxpyNeon(alpha, x, y, n);
         return;
     }
 #endif
@@ -444,6 +651,11 @@ inline float ComputeLogSumExp(const float *in, size_t n) noexcept
     {
         return ComputeLogSumExpAvx2(in, n);
     }
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    if (n >= 4)
+    {
+        return ComputeLogSumExpNeon(in, n);
+    }
 #endif
     return ComputeLogSumExpScalar(in, n);
 }
@@ -462,6 +674,12 @@ inline void LogSoftmax(const float *in, float *out, size_t n) noexcept
     if (HasAvx2Fma() && n >= 8)
     {
         LogSoftmaxAvx2(in, out, n, log_denom);
+        return;
+    }
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    if (n >= 4)
+    {
+        LogSoftmaxNeon(in, out, n, log_denom);
         return;
     }
 #endif

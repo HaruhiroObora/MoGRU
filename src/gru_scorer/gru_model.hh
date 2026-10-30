@@ -44,6 +44,8 @@ namespace charindex
 namespace gruscorer
 {
 
+class GruGpuBackend;
+
 #pragma pack(push, 1)
 struct ModelHeader
 {
@@ -237,6 +239,7 @@ public:
     bool is_loaded() const noexcept { return is_loaded_; }
     uint32_t vocab_size() const noexcept { return vocab_size_; }
     uint32_t hidden_size() const noexcept { return hidden_size_; }
+    const GruGpuBackend *gpu_backend() const noexcept { return gpu_backend_.get(); }
 
 private:
     struct AlignedDeleter
@@ -251,6 +254,11 @@ private:
                         const float *h_prev,
                         float *h_next) const;
 
+    /**
+     * @brief Recomputes precomputed input gates table: G_in[v] = W_ih * W_emb[v] + b_ih
+     */
+    void RebuildPrecomputedInputGates();
+
     bool is_loaded_ = false;
     bool has_revert_snapshot_ = false;
     uint32_t vocab_size_ = 0;
@@ -261,6 +269,8 @@ private:
     std::unique_ptr<float[], AlignedDeleter> weights_buffer_;
     std::unique_ptr<float[], AlignedDeleter> base_weights_buffer_;
     std::unique_ptr<float[], AlignedDeleter> revert_weights_buffer_;
+    std::unique_ptr<float[], AlignedDeleter> precomputed_gi_; // [vocab_size * 3 * hidden_size]
+    std::unique_ptr<GruGpuBackend> gpu_backend_;
 
     // Pointers into weights_buffer_
     float *w_emb_ = nullptr; // [vocab_size, hidden_size]

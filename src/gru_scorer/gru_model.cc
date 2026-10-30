@@ -30,6 +30,7 @@
 #include "gru_scorer/gru_model.hh"
 #include "gru_scorer/math_ops.hh"
 #include "gru_scorer/charindex.hh"
+#include "gru_scorer/gpu_backend.hh"
 
 #include <cmath>
 #include <cstdlib>
@@ -180,8 +181,41 @@ bool GruModel::LoadModel(const std::string &path)
     w_out_ = ptr; ptr += size_out;
     b_out_ = ptr; ptr += size_bout;
 
+    RebuildPrecomputedInputGates();
+
+    gpu_backend_ = GruGpuBackend::Create(vocab_size_, hidden_size_);
+    if (gpu_backend_)
+    {
+        gpu_backend_->UploadWeights(w_emb_, w_ih_, w_hh_, b_ih_, b_hh_, w_out_, b_out_);
+    }
+
     is_loaded_ = true;
     return true;
+}
+
+void GruModel::RebuildPrecomputedInputGates()
+{
+    if (vocab_size_ == 0 || hidden_size_ == 0 || w_emb_ == nullptr || w_ih_ == nullptr || b_ih_ == nullptr)
+    {
+        return;
+    }
+    const size_t V = vocab_size_;
+    const size_t H = hidden_size_;
+    const size_t H3 = 3 * H;
+
+    if (!precomputed_gi_)
+    {
+        float *buf = AllocateAlignedFloats(V * H3);
+        if (!buf) return;
+        precomputed_gi_.reset(buf);
+    }
+
+    float *gi_table = precomputed_gi_.get();
+    for (size_t v = 0; v < V; ++v)
+    {
+        const float *e_v = &w_emb_[v * H];
+        math::Gemv(w_ih_, e_v, b_ih_, &gi_table[v * H3], H3, H);
+    }
 }
 
 bool GruModel::LoadUserWeights(const std::string &path)
@@ -230,6 +264,12 @@ bool GruModel::LoadUserWeights(const std::string &path)
 
     std::memcpy(weights_buffer_.get(), tmp_buf.data(), total_bytes);
     has_revert_snapshot_ = false;
+
+    RebuildPrecomputedInputGates();
+    if (gpu_backend_)
+    {
+        gpu_backend_->SyncOutputWeights(w_out_, b_out_);
+    }
     return true;
 }
 
@@ -293,6 +333,12 @@ bool GruModel::RevertLastTrainStep()
     std::memcpy(weights_buffer_.get(), revert_weights_buffer_.get(),
                 total_elements_ * sizeof(float));
     has_revert_snapshot_ = false;
+
+    RebuildPrecomputedInputGates();
+    if (gpu_backend_)
+    {
+        gpu_backend_->SyncOutputWeights(w_out_, b_out_);
+    }
     return true;
 }
 
@@ -305,6 +351,12 @@ void GruModel::ResetToBaseWeights()
     std::memcpy(weights_buffer_.get(), base_weights_buffer_.get(),
                 total_elements_ * sizeof(float));
     has_revert_snapshot_ = false;
+
+    RebuildPrecomputedInputGates();
+    if (gpu_backend_)
+    {
+        gpu_backend_->SyncOutputWeights(w_out_, b_out_);
+    }
 }
 
 void GruModel::ForwardGruCell(uint16_t token_id,
@@ -325,24 +377,35 @@ void GruModel::ForwardGruCell(uint16_t token_id,
 
     std::vector<float> gi_heap;
     std::vector<float> gh_heap;
-    float *gi = gi_stack;
+    const float *gi = nullptr;
     float *gh = gh_stack;
+
+    if (precomputed_gi_) [[likely]]
+    {
+        gi = &precomputed_gi_[static_cast<size_t>(token_id) * H3];
+    }
+    else
+    {
+        if (H3 > kMaxStackH3) [[unlikely]]
+        {
+            gi_heap.resize(H3);
+            gi = gi_heap.data();
+        }
+        else
+        {
+            gi = gi_stack;
+        }
+        const float *e_t = &w_emb_[static_cast<size_t>(token_id) * H];
+        math::Gemv(w_ih_, e_t, b_ih_, const_cast<float *>(gi), H3, H);
+    }
 
     if (H3 > kMaxStackH3) [[unlikely]]
     {
-        gi_heap.resize(H3);
         gh_heap.resize(H3);
-        gi = gi_heap.data();
         gh = gh_heap.data();
     }
 
-    // 1. Lookup embedding for token_id
-    const float *e_t = &w_emb_[static_cast<size_t>(token_id) * H];
-
-    // 2. gi = W_ih * e_t + b_ih
-    math::Gemv(w_ih_, e_t, b_ih_, gi, H3, H);
-
-    // 3. gh = W_hh * h_prev + b_hh
+    // gh = W_hh * h_prev + b_hh
     if (h_prev != nullptr)
     {
         math::Gemv(w_hh_, h_prev, b_hh_, gh, H3, H);
@@ -352,7 +415,7 @@ void GruModel::ForwardGruCell(uint16_t token_id,
         std::memcpy(gh, b_hh_, H3 * sizeof(float));
     }
 
-    // 4. Update GRU gates and compute h_next
+    // Update GRU gates and compute h_next
     alignas(64) float zero_h[256] = {0.0f};
     const float *prev_h_vec = h_prev;
     if (prev_h_vec == nullptr)
@@ -363,8 +426,8 @@ void GruModel::ForwardGruCell(uint16_t token_id,
         }
         else
         {
-            gi_heap.assign(H, 0.0f);
-            prev_h_vec = gi_heap.data();
+            gh_heap.assign(H, 0.0f);
+            prev_h_vec = gh_heap.data();
         }
     }
 
@@ -519,38 +582,74 @@ float GruModel::ScoreStringWithContext(const charindex::CharIndex &indexer,
     }
 
     const size_t H = hidden_size_;
-    std::vector<float> h_buf1(context.h);
-    std::vector<float> h_buf2(H, 0.0f);
-    float *h_curr = h_buf1.data();
-    float *h_next = h_buf2.data();
+    const size_t T = token_ids.size();
 
-    float total_log_prob = 0.0f;
+    // Stage 1: Generate full hidden state sequence H_seq [T, H]
+    std::vector<float> h_seq(T * H);
+    const float *h_curr = context.h.data();
     uint16_t prev_token = context.last_token;
 
-    for (size_t t = 0; t < token_ids.size(); ++t)
+    for (size_t t = 0; t < T; ++t)
     {
+        float *h_next = &h_seq[t * H];
+        ForwardGruCell(prev_token, h_curr, h_next);
         uint16_t target_token = token_ids[t];
         if (target_token >= vocab_size_) [[unlikely]]
         {
             target_token = kUnkTokenId;
         }
+        prev_token = target_token;
+        h_curr = h_next;
+    }
 
-        // Fast zero-store step: directly computes log P(target_token | history)
-        float token_log_prob = StepWithTargetLogProb(prev_token, h_curr, h_next, target_token);
+    // Stage 2: Batched Output GEMM + LogSumExp
+    float total_log_prob = 0.0f;
+    bool gpu_computed = false;
 
-        if (target_token == kUnkTokenId)
+    if (gpu_backend_)
+    {
+        gpu_computed = gpu_backend_->ScoreSequenceOutputBatch(
+            h_seq.data(), token_ids.data(), T, nullptr, &total_log_prob);
+    }
+
+    if (!gpu_computed)
+    {
+        constexpr size_t kMaxStackVocab = 4096;
+        alignas(64) float logits_stack[kMaxStackVocab];
+        std::vector<float> logits_heap;
+        float *logits = logits_stack;
+
+        if (vocab_size_ > kMaxStackVocab) [[unlikely]]
         {
-            token_log_prob = std::min(token_log_prob, -6.0f) - 6.0f;
+            logits_heap.resize(vocab_size_);
+            logits = logits_heap.data();
         }
 
-        total_log_prob += token_log_prob;
-        prev_token = target_token;
-        std::swap(h_curr, h_next);
+        for (size_t t = 0; t < T; ++t)
+        {
+            uint16_t target_token = token_ids[t];
+            if (target_token >= vocab_size_) [[unlikely]]
+            {
+                target_token = kUnkTokenId;
+            }
+
+            const float *h_t = &h_seq[t * H];
+            math::Gemv(w_out_, h_t, b_out_, logits, vocab_size_, hidden_size_);
+            const float log_denom = math::ComputeLogSumExp(logits, vocab_size_);
+            float token_lp = logits[target_token] - log_denom;
+
+            if (target_token == kUnkTokenId)
+            {
+                token_lp = std::min(token_lp, -6.0f) - 6.0f;
+            }
+
+            total_log_prob += token_lp;
+        }
     }
 
     if (normalize)
     {
-        return total_log_prob / static_cast<float>(token_ids.size());
+        return total_log_prob / static_cast<float>(T);
     }
 
     return total_log_prob;
@@ -589,49 +688,74 @@ float GruModel::ScoreString(const charindex::CharIndex &indexer,
     }
 
     const size_t H = hidden_size_;
+    const size_t T = token_ids.size();
 
-    // Ping-pong buffers for hidden states
-    std::vector<float> h_buf1(H, 0.0f);
-    std::vector<float> h_buf2(H, 0.0f);
-    float *h_curr = h_buf1.data();
-    float *h_next = h_buf2.data();
-
-    if (initial_h != nullptr)
-    {
-        std::memcpy(h_curr, initial_h, H * sizeof(float));
-    }
-
-    float total_log_prob = 0.0f;
+    // Stage 1: Generate full hidden state sequence H_seq [T, H]
+    std::vector<float> h_seq(T * H);
+    const float *h_curr = initial_h;
     uint16_t prev_token = kBosTokenId;
 
-    for (size_t t = 0; t < token_ids.size(); ++t)
+    for (size_t t = 0; t < T; ++t)
     {
+        float *h_next = &h_seq[t * H];
+        ForwardGruCell(prev_token, (t == 0 && initial_h == nullptr) ? nullptr : h_curr, h_next);
         uint16_t target_token = token_ids[t];
         if (target_token >= vocab_size_) [[unlikely]]
         {
             target_token = kUnkTokenId;
         }
+        prev_token = target_token;
+        h_curr = h_next;
+    }
 
-        // Fast zero-store step: directly computes log P(target_token | history)
-        float token_log_prob = StepWithTargetLogProb(
-            prev_token,
-            (t == 0 && initial_h == nullptr) ? nullptr : h_curr,
-            h_next,
-            target_token);
+    // Stage 2: Batched Output GEMM + LogSumExp
+    float total_log_prob = 0.0f;
+    bool gpu_computed = false;
 
-        if (target_token == kUnkTokenId)
+    if (gpu_backend_)
+    {
+        gpu_computed = gpu_backend_->ScoreSequenceOutputBatch(
+            h_seq.data(), token_ids.data(), T, nullptr, &total_log_prob);
+    }
+
+    if (!gpu_computed)
+    {
+        constexpr size_t kMaxStackVocab = 4096;
+        alignas(64) float logits_stack[kMaxStackVocab];
+        std::vector<float> logits_heap;
+        float *logits = logits_stack;
+
+        if (vocab_size_ > kMaxStackVocab) [[unlikely]]
         {
-            token_log_prob = std::min(token_log_prob, -6.0f) - 6.0f;
+            logits_heap.resize(vocab_size_);
+            logits = logits_heap.data();
         }
 
-        total_log_prob += token_log_prob;
-        prev_token = target_token;
-        std::swap(h_curr, h_next);
+        for (size_t t = 0; t < T; ++t)
+        {
+            uint16_t target_token = token_ids[t];
+            if (target_token >= vocab_size_) [[unlikely]]
+            {
+                target_token = kUnkTokenId;
+            }
+
+            const float *h_t = &h_seq[t * H];
+            math::Gemv(w_out_, h_t, b_out_, logits, vocab_size_, hidden_size_);
+            const float log_denom = math::ComputeLogSumExp(logits, vocab_size_);
+            float token_lp = logits[target_token] - log_denom;
+
+            if (target_token == kUnkTokenId)
+            {
+                token_lp = std::min(token_lp, -6.0f) - 6.0f;
+            }
+
+            total_log_prob += token_lp;
+        }
     }
 
     if (normalize)
     {
-        return total_log_prob / static_cast<float>(token_ids.size());
+        return total_log_prob / static_cast<float>(T);
     }
 
     return total_log_prob;
@@ -791,8 +915,15 @@ float GruModel::TrainOnStringWithContext(const charindex::CharIndex &indexer,
         const uint16_t y_t = token_ids[t];
         x_tokens[t] = x_t;
 
-        const float *e_t = &w_emb_[static_cast<size_t>(x_t) * H];
-        math::Gemv(w_ih_, e_t, b_ih_, gi.data(), H3, H);
+        if (precomputed_gi_)
+        {
+            std::memcpy(gi.data(), &precomputed_gi_[static_cast<size_t>(x_t) * H3], H3 * sizeof(float));
+        }
+        else
+        {
+            const float *e_t = &w_emb_[static_cast<size_t>(x_t) * H];
+            math::Gemv(w_ih_, e_t, b_ih_, gi.data(), H3, H);
+        }
 
         if (t > 0 || has_initial_h)
         {
@@ -951,6 +1082,12 @@ float GruModel::TrainOnStringWithContext(const charindex::CharIndex &indexer,
         {
             w_ptr[i] -= eff_lr * grad_all[i] + anchor_decay * (w_ptr[i] - base_ptr[i]);
         }
+
+        RebuildPrecomputedInputGates();
+        if (gpu_backend_)
+        {
+            gpu_backend_->SyncOutputWeights(w_out_, b_out_);
+        }
     }
     else
     {
@@ -973,6 +1110,11 @@ float GruModel::TrainOnStringWithContext(const charindex::CharIndex &indexer,
         for (size_t i = 0; i < out_elements; ++i)
         {
             w_out_ptr[i] -= eff_lr * grad_out_only[i] + anchor_decay * (w_out_ptr[i] - base_out_ptr[i]);
+        }
+
+        if (gpu_backend_)
+        {
+            gpu_backend_->SyncOutputWeights(w_out_, b_out_);
         }
     }
 

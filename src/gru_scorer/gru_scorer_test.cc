@@ -28,6 +28,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "gru_scorer/gru_model.hh"
+#include "gru_scorer/gpu_backend.hh"
 #include "gru_scorer/math_ops.hh"
 #include "gru_scorer/charindex.hh"
 
@@ -339,6 +340,7 @@ void TestOnlineTrainingAndPersistence()
 
     const float after_step1 = model.ScoreStringWithContext(indexer, target, ctx0, true);
     assert(after_step1 > base_score && "Output-only training must improve target log-probability");
+    (void)after_step1;
 
     // Verify that prefix hidden context is unchanged in OutputOnly mode
     auto ctx_after_out = model.ComputeContext(indexer, prefix);
@@ -463,6 +465,134 @@ void BenchmarkInference()
     std::cout << "  - Throughput: " << static_cast<int>(1000000.0 / us_per_step) << " chars/sec" << std::endl;
 }
 
+void TestGpuBackendAndBatchedInference()
+{
+    std::cout << "[Test] Running TestGpuBackendAndBatchedInference..." << std::endl;
+
+    charindex::CharIndex indexer;
+    std::string chardata_path = FindDataFile("chardata.bin");
+    assert(indexer.LoadFile(chardata_path));
+
+    std::string model_path = FindDataFile("dummy_model.bin");
+
+    // 1. Load model with default / detected backend
+    gruscorer::GruModel model_default;
+    bool ok_default = model_default.LoadModel(model_path);
+    assert(ok_default);
+    (void)ok_default;
+
+    if (model_default.gpu_backend())
+    {
+        std::cout << "  - Detected Active Backend: " << model_default.gpu_backend()->GetBackendType()
+                  << " on " << model_default.gpu_backend()->GetDeviceName() << std::endl;
+    }
+    else
+    {
+        std::cout << "  - Active Backend: Host CPU SIMD (AVX2/NEON)" << std::endl;
+    }
+
+    // Test text sequences with varying lengths
+    const std::vector<std::string> test_sentences = {
+        "こんにちは",
+        "今日はとても良い天気ですね",
+        "東京都千代田区永田町",
+        "オープンソース日本語入力システムMoGRU",
+        "文字単位ニューラル言語モデルによる同音異義語リランキング",
+    };
+
+    // Compare with CPU mode (MOGRU_USE_GPU=0)
+    setenv("MOGRU_USE_GPU", "0", 1);
+    gruscorer::GruModel model_cpu;
+    bool ok_cpu = model_cpu.LoadModel(model_path);
+    assert(ok_cpu);
+    assert(model_cpu.gpu_backend() == nullptr);
+    (void)ok_cpu;
+
+    // Compare with Force GPU mode (MOGRU_USE_GPU=1)
+    setenv("MOGRU_USE_GPU", "1", 1);
+    gruscorer::GruModel model_gpu;
+    bool ok_gpu = model_gpu.LoadModel(model_path);
+    assert(ok_gpu);
+    assert(model_gpu.gpu_backend() != nullptr);
+    (void)ok_gpu;
+
+    std::cout << "  - Force GPU Backend: " << model_gpu.gpu_backend()->GetBackendType()
+              << " (" << model_gpu.gpu_backend()->GetDeviceName() << ")" << std::endl;
+
+    for (const auto &text : test_sentences)
+    {
+        float score_cpu = model_cpu.ScoreString(indexer, text, nullptr, true);
+        float score_gpu = model_gpu.ScoreString(indexer, text, nullptr, true);
+        AssertNear(score_gpu, score_cpu, 1e-4f, "CPU vs GPU ScoreString for: " + text);
+
+        // Test with context
+        auto ctx_cpu = model_cpu.ComputeContext(indexer, "前文脈：");
+        auto ctx_gpu = model_gpu.ComputeContext(indexer, "前文脈：");
+        float score_ctx_cpu = model_cpu.ScoreStringWithContext(indexer, text, ctx_cpu, true);
+        float score_ctx_gpu = model_gpu.ScoreStringWithContext(indexer, text, ctx_gpu, true);
+        AssertNear(score_ctx_gpu, score_ctx_cpu, 1e-4f, "CPU vs GPU ScoreStringWithContext for: " + text);
+    }
+
+    // Clear environment variable
+    unsetenv("MOGRU_USE_GPU");
+
+    std::cout << "[Test] TestGpuBackendAndBatchedInference passed successfully!" << std::endl;
+}
+
+void BenchmarkBatchedInference()
+{
+    std::cout << "[Bench] Running BenchmarkBatchedInference (Sequence Candidate Scoring)..." << std::endl;
+
+    charindex::CharIndex indexer;
+    std::string chardata_path = FindDataFile("chardata.bin");
+    indexer.LoadFile(chardata_path);
+
+    std::string model_path = FindDataFile("dummy_model.bin");
+    gruscorer::GruModel model;
+    model.LoadModel(model_path);
+
+    auto ctx = model.ComputeContext(indexer, "本日の天候は");
+    const std::vector<std::string> candidates = {
+        "快晴です",
+        "晴れのち曇り",
+        "雨天決行",
+        "全国的に高気圧に覆われて穏やかに晴れる見込みです",
+        "一時的に強い雨や雷雨となる所があるでしょう",
+    };
+
+    // Warm-up
+    for (int i = 0; i < 100; ++i)
+    {
+        for (const auto &cand : candidates)
+        {
+            model.ScoreStringWithContext(indexer, cand, ctx, true);
+        }
+    }
+
+    constexpr int kLoops = 1000;
+    auto start = std::chrono::high_resolution_clock::now();
+
+    size_t total_chars = 0;
+    for (int loop = 0; loop < kLoops; ++loop)
+    {
+        for (const auto &cand : candidates)
+        {
+            float s = model.ScoreStringWithContext(indexer, cand, ctx, true);
+            (void)s;
+            if (loop == 0) total_chars += cand.size(); // approx bytes
+        }
+    }
+
+    auto end = std::chrono::high_resolution_clock::now();
+    double total_ms = std::chrono::duration<double, std::milli>(end - start).count();
+    double total_evals = static_cast<double>(kLoops * candidates.size());
+    double us_per_cand = (total_ms * 1000.0) / total_evals;
+
+    std::cout << "  - Evaluated " << static_cast<int>(total_evals) << " candidate phrases in " << total_ms << " ms" << std::endl;
+    std::cout << "  - Latency per phrase evaluation: " << us_per_cand << " microseconds" << std::endl;
+    std::cout << "  - Phrase evaluation throughput: " << static_cast<int>(1000000.0 / us_per_cand) << " candidates/sec" << std::endl;
+}
+
 int main()
 {
     std::cout << "========================================" << std::endl;
@@ -474,7 +604,9 @@ int main()
     TestCharIndexIntegration();
     TestGruContextCaching();
     TestOnlineTrainingAndPersistence();
+    TestGpuBackendAndBatchedInference();
     BenchmarkInference();
+    BenchmarkBatchedInference();
 
     std::cout << "========================================" << std::endl;
     std::cout << "All Tests & Benchmarks Passed Successfully!" << std::endl;

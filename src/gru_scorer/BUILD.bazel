@@ -5,6 +5,7 @@ load(
     "//:build_defs.bzl",
     "mozc_cc_library",
     "mozc_cc_test",
+    "mozc_select",
 )
 
 package(default_visibility = ["//visibility:public"])
@@ -23,12 +24,18 @@ mozc_cc_library(
 mozc_cc_library(
     name = "gru_scorer",
     srcs = [
+        "gpu_backend.cc",
         "gru_model.cc",
     ],
     hdrs = [
+        "gpu_backend.hh",
         "gru_model.hh",
         "math_ops.hh",
     ],
+    linkopts = mozc_select(
+        linux = ["-ldl"],
+        default = [],
+    ),
     deps = [
         ":charindex",
     ],
