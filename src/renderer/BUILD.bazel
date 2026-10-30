@@ -322,7 +322,6 @@ mozc_objc_library(
     name = "mozc_renderer_lib_macos",
     srcs = [
         "mac/CandidateController.mm",
-        "mac/CandidateView.mm",
         "mac/CandidateWindow.mm",
         "mac/InfolistView.mm",
         "mac/InfolistWindow.mm",
@@ -333,7 +332,6 @@ mozc_objc_library(
     ],
     hdrs = [
         "mac/CandidateController.h",
-        "mac/CandidateView.h",
         "mac/CandidateWindow.h",
         "mac/InfolistView.h",
         "mac/InfolistWindow.h",

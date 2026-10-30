@@ -60,7 +60,6 @@ void RendererBaseWindow::InitWindow() {
   ResetView();
   [window_ setContentView:view_];
   [window_ setDisplaysWhenScreenProfileChanges:YES];
-  [window_ makeKeyAndOrderFront:nil];
   [window_ setFloatingPanel:YES];
   [window_ setWorksWhenModal:YES];
   [window_ setBackgroundColor:NSColor.whiteColor];

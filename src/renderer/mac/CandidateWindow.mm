@@ -32,10 +32,10 @@
 
 #include <cmath>
 
-#import "CandidateView.h"
 #import "renderer/MoGRUCandidateUI-Swift.h"
 
 #include "absl/log/log.h"
+#include "base/coordinates.h"
 #include "base/coordinates.h"
 #include "protocol/commands.pb.h"
 #include "renderer/mac/CandidateWindow.h"
@@ -61,9 +61,7 @@ namespace mozc {
 namespace renderer {
 namespace mac {
 
-CandidateWindow::CandidateWindow()
-    : command_sender_(nullptr),
-      layout_view_([[CandidateView alloc] initWithFrame:NSMakeRect(0, 0, 1, 1)]) {}
+CandidateWindow::CandidateWindow() : command_sender_(nullptr) {}
 
 CandidateWindow::~CandidateWindow() {}
 
@@ -86,8 +84,22 @@ void CandidateWindow::InitWindow() {
   [window_ setOpaque:NO];
   [window_ setHasShadow:YES];
 }
-const mozc::renderer::TableLayout* CandidateWindow::GetTableLayout() const {
-  return [layout_view_ tableLayout];
+mozc::Rect CandidateWindow::GetCandidateRowRect(int index) const {
+  if (!view_) {
+    return mozc::Rect();
+  }
+  MoGRUCandidateView *candidate_view = (MoGRUCandidateView *)view_;
+  const NSRect frame = [candidate_view frameForCandidateAt:index];
+  const NSSize size = candidate_view.preferredSize;
+  return mozc::Rect(frame.origin.x, size.height - NSMaxY(frame),
+                    frame.size.width, frame.size.height);
+}
+
+void CandidateWindow::Show() {
+  if (!window_) {
+    InitWindow();
+  }
+  [window_ orderFrontRegardless];
 }
 
 void CandidateWindow::SetCandidateWindow(const commands::CandidateWindow& candidate_window) {
@@ -99,11 +111,6 @@ void CandidateWindow::SetCandidateWindow(const commands::CandidateWindow& candid
   if (!window_) {
     InitWindow();
   }
-  // Keep the legacy table layout solely for Mozc's existing screen and
-  // cascading-window placement calculations; SwiftUI owns the visible view.
-  [layout_view_ setCandidateWindow:&candidate_window];
-  [layout_view_ updateLayout];
-
   NSMutableArray<MoGRUCandidateItem *> *items = [NSMutableArray array];
   for (const auto &candidate : candidate_window.candidate()) {
     const auto &annotation = candidate.annotation();

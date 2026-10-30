@@ -101,6 +101,11 @@ public final class MoGRUCandidateView: NSView {
         let fitting = hostingView.fittingSize
         return NSSize(width: max(180, fitting.width), height: min(300, fitting.height))
     }
+
+    /// Returns a candidate's current row in AppKit coordinates for a submenu.
+    @objc public func frameForCandidate(at index: Int) -> NSRect {
+        CandidateListView(state: state).frame(forCandidateAt: index, in: preferredSize) ?? .zero
+    }
 }
 
 /// Nagi's candidate layout adapted to MoGRU's renderer data.
@@ -121,6 +126,13 @@ private struct CandidateListView: View {
             switch self {
             case .text(let candidate): return candidate.index
             case .grid(let candidates): return candidates.first?.index ?? -1
+            }
+        }
+
+        var height: CGFloat {
+            switch self {
+            case .text: return CandidateListView.rowHeight
+            case .grid: return CandidateListView.gridCellSize + 4
             }
         }
 
@@ -154,6 +166,23 @@ private struct CandidateListView: View {
         let focusedRow = allRows.firstIndex { $0.contains(state.focusedIndex) } ?? 0
         let start = min(max(0, focusedRow - Self.maxRows / 2), allRows.count - Self.maxRows)
         return Array(allRows[start..<(start + Self.maxRows)])
+    }
+
+    /// Finds the visible row for a candidate in AppKit's bottom-up coordinates.
+    func frame(forCandidateAt index: Int, in size: NSSize) -> NSRect? {
+        var topOffset: CGFloat = 4
+        for row in visibleRows {
+            if row.contains(index) {
+                return NSRect(
+                    x: 0,
+                    y: size.height - topOffset - row.height,
+                    width: size.width,
+                    height: row.height
+                )
+            }
+            topOffset += row.height
+        }
+        return nil
     }
 
     var body: some View {
