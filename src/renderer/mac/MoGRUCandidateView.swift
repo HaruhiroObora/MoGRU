@@ -94,10 +94,13 @@ public final class MoGRUCandidateView: NSView {
         state.focusedIndex = focusedIndex
         state.footer = footer
         hostingView.invalidateIntrinsicContentSize()
+        hostingView.needsLayout = true
     }
 
     /// Returns the SwiftUI content size for the surrounding NSPanel.
     @objc public var preferredSize: NSSize {
+        // Resolve pending SwiftUI layout before positioning the panel.
+        hostingView.layoutSubtreeIfNeeded()
         let fitting = hostingView.fittingSize
         return NSSize(width: max(180, fitting.width), height: min(300, fitting.height))
     }
@@ -205,7 +208,6 @@ private struct CandidateListView: View {
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .fixedSize(horizontal: true, vertical: false)
-        .animation(.spring(response: 0.28, dampingFraction: 0.82), value: state.focusedIndex)
     }
 
     @ViewBuilder

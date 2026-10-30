@@ -62,7 +62,8 @@ namespace mozc {
 namespace renderer {
 namespace mac {
 
-CandidateWindow::CandidateWindow() : command_sender_(nullptr) {}
+CandidateWindow::CandidateWindow()
+    : command_sender_(nullptr), preferred_size_(NSMakeSize(0, 0)) {}
 
 CandidateWindow::~CandidateWindow() {}
 
@@ -96,10 +97,26 @@ mozc::Rect CandidateWindow::GetCandidateRowRect(int index) const {
                     frame.size.width, frame.size.height);
 }
 
+Size CandidateWindow::GetWindowSize() const {
+  return Size(preferred_size_.width, preferred_size_.height);
+}
+
+void CandidateWindow::MoveWindow(const NSPoint &point) {
+  // Commit position and size together; resizing at the previous origin first
+  // can briefly display the panel at the wrong position.
+  const NSRect frame = {point, preferred_size_};
+  if (!NSEqualRects([window_ frame], frame)) {
+    [window_ setFrame:frame display:NO animate:NO];
+  }
+}
+
 void CandidateWindow::Show() {
   if (!window_) {
     InitWindow();
   }
+  // Also apply the size when an update has no preedit rectangle to align to.
+  MoveWindow([window_ frame].origin);
+  [view_ layoutSubtreeIfNeeded];
   [window_ orderFrontRegardless];
 }
 
@@ -155,7 +172,8 @@ void CandidateWindow::SetCandidateWindow(const commands::CandidateWindow& candid
                    ? candidate_window.focused_index() : -1
                      footer:[footer_parts componentsJoinedByString:@"  "]];
   const NSSize size = candidate_view.preferredSize;
-  ResizeWindow(std::ceil(size.width), std::ceil(size.height));
+  // Alignment uses this size without changing the visible panel yet.
+  preferred_size_ = NSMakeSize(std::ceil(size.width), std::ceil(size.height));
 }
 
 void CandidateWindow::ResetView() {

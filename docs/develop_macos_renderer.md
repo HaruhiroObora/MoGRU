@@ -45,3 +45,9 @@ updates model and user configuration files.
 After an update, test candidate movement and selection in TextEdit. A change
 to the input source's bundle identifier or LaunchAgent registration may
 require a fresh login; normal candidate view changes keep those identifiers.
+
+For candidate positioning changes, check the first appearance and reopening
+after moving the caret elsewhere. Also test changes in candidate count,
+text/emoji pages, cascading candidates, and placement near screen edges.
+The entire panel should appear at its final position without a brief jump,
+and typing focus should stay in the target application.

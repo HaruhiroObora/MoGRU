@@ -42,7 +42,7 @@ class RendererBaseWindow {
  public:
   RendererBaseWindow(const RendererBaseWindow &) = delete;
   RendererBaseWindow &operator=(const RendererBaseWindow &) = delete;
-  Size GetWindowSize() const;
+  virtual Size GetWindowSize() const;
   virtual void Hide();
   virtual void Show();
   virtual void MoveWindow(const NSPoint &point);

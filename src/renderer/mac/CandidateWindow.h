@@ -55,12 +55,15 @@ class CandidateWindow : public RendererBaseWindow {
       client::SendCommandInterface *send_command_interface);
   void SetCandidateWindow(const commands::CandidateWindow &candidate_window);
   mozc::Rect GetCandidateRowRect(int index) const;
+  Size GetWindowSize() const override;
+  void MoveWindow(const NSPoint &point) override;
   void Show() override;
 
  private:
   void InitWindow();
   void ResetView();
   mozc::client::SendCommandInterface *command_sender_;
+  NSSize preferred_size_;
 };
 
 }  // namespace mac

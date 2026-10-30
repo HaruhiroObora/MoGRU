@@ -7,15 +7,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-for command in git gh sudo installer; do
-  if ! command -v "$command" >/dev/null 2>&1; then
-    echo "Missing command: $command" >&2
-    exit 1
-  fi
-done
-
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$repo_root"
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 ci_repo="Harumaru169/MoGRU"
 remote_url="$(git remote get-url origin)"
@@ -80,8 +72,8 @@ fi
 download_dir="$(mktemp -d)"
 trap 'rm -rf "$download_dir"' EXIT
 gh run download "$run_id" -R "$ci_repo" -n "$artifact_name" -D "$download_dir"
-package="$(find "$download_dir" -name 'MoGRU.pkg' -print | sed -n '1p')"
-if [[ -z "$package" ]]; then
+package="$download_dir/MoGRU.pkg"
+if [[ ! -f "$package" ]]; then
   echo "CI artifact did not contain MoGRU.pkg." >&2
   exit 1
 fi
