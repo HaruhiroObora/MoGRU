@@ -112,10 +112,11 @@ bazel_dep(
     repo_name = "build_bazel_rules_apple",
 )
 
-# SwiftUI candidate renderer for the macOS input method.
+# SwiftUI candidate renderer for the macOS input method. Version 3.6.1 is
+# compatible with the existing apple_support and rules_cc versions.
 bazel_dep(
     name = "rules_swift",
-    version = "4.2.2",
+    version = "3.6.1",
 )
 
 # apple_support: 2.4.0 2026-03-27

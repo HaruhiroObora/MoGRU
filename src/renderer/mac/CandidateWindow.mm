@@ -36,7 +36,6 @@
 
 #include "absl/log/log.h"
 #include "base/coordinates.h"
-#include "base/coordinates.h"
 #include "protocol/commands.pb.h"
 #include "renderer/mac/CandidateWindow.h"
 
