@@ -38,6 +38,16 @@
 #include <iostream>
 #include <vector>
 
+#define ENSURE(cond) \
+    do \
+    { \
+        if (!(cond)) \
+        { \
+            std::cerr << "Assertion failed: " #cond << " at " << __FILE__ << ":" << __LINE__ << std::endl; \
+            std::abort(); \
+        } \
+    } while (0)
+
 void AssertNear(float actual, float expected, float tolerance = 1e-4f, const std::string &msg = "")
 {
     float diff = std::fabs(actual - expected);
@@ -132,6 +142,41 @@ void TestMathOps()
         float lse_avx2 = gruscorer::math::ComputeLogSumExpAvx2(y_scalar.data(), kRows);
         AssertNear(lse_avx2, lse_scalar, 1e-4f, "LogSumExp AVX2 vs Scalar");
     }
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    {
+        constexpr size_t kRows = 257;
+        constexpr size_t kCols = 135;
+        std::vector<float> big_W(kRows * kCols);
+        std::vector<float> big_x(kCols);
+        std::vector<float> big_b(kRows);
+        std::vector<float> y_scalar(kRows);
+        std::vector<float> y_neon(kRows);
+
+        for (size_t i = 0; i < big_W.size(); ++i)
+        {
+            big_W[i] = std::sin(static_cast<float>(i + 1) * 0.01f);
+        }
+        for (size_t i = 0; i < big_x.size(); ++i)
+        {
+            big_x[i] = std::cos(static_cast<float>(i + 1) * 0.02f);
+        }
+        for (size_t i = 0; i < big_b.size(); ++i)
+        {
+            big_b[i] = 0.1f * static_cast<float>(i % 10);
+        }
+
+        gruscorer::math::GemvScalar(big_W.data(), big_x.data(), big_b.data(), y_scalar.data(), kRows, kCols);
+        gruscorer::math::GemvNeon(big_W.data(), big_x.data(), big_b.data(), y_neon.data(), kRows, kCols);
+
+        for (size_t r = 0; r < kRows; ++r)
+        {
+            AssertNear(y_neon[r], y_scalar[r], 1e-4f, "Gemv NEON vs Scalar row " + std::to_string(r));
+        }
+
+        float lse_scalar = gruscorer::math::ComputeLogSumExpScalar(y_scalar.data(), kRows);
+        float lse_neon = gruscorer::math::ComputeLogSumExpNeon(y_scalar.data(), kRows);
+        AssertNear(lse_neon, lse_scalar, 1e-3f, "LogSumExp NEON vs Scalar");
+    }
 #endif
 
     std::cout << "[Test] TestMathOps passed." << std::endl;
@@ -170,10 +215,11 @@ void TestGruModelInference()
     std::string path = FindDataFile("dummy_model.bin");
     const bool loaded = model.LoadModel(path);
     (void)loaded;
-    assert(loaded && "Failed to load dummy_model.bin");
-    assert(model.is_loaded());
-    assert(model.vocab_size() == 4096);
-    assert(model.hidden_size() == 64);
+    ENSURE(loaded && "Failed to load dummy_model.bin");
+    ENSURE(model.is_loaded());
+    ENSURE(model.vocab_size() == 4096);
+    ENSURE(model.has_precomputed_input_gates() && "Precomputed input gates must be initialized on model load");
+    ENSURE(model.hidden_size() == 64);
 
     const size_t H = model.hidden_size();
     const size_t V = model.vocab_size();
@@ -232,28 +278,28 @@ void TestCharIndexIntegration()
     std::string chardata_path = FindDataFile("chardata.bin");
     const bool loaded_char = indexer.LoadFile(chardata_path);
     (void)loaded_char;
-    assert(loaded_char && "Failed to load chardata.bin");
+    ENSURE(loaded_char && "Failed to load chardata.bin");
 
     gruscorer::GruModel model;
     std::string model_path = FindDataFile("dummy_model.bin");
     const bool loaded_model = model.LoadModel(model_path);
     (void)loaded_model;
-    assert(loaded_model && "Failed to load dummy_model.bin");
+    ENSURE(loaded_model && "Failed to load dummy_model.bin");
 
     std::string text = "今日は良い天気";
     float score = model.ScoreString(indexer, text);
 
     std::cout << "  - Text: \"" << text << "\", Log-likelihood Score: " << score << std::endl;
-    assert(!std::isnan(score) && !std::isinf(score));
-    assert(score < 0.0f);
+    ENSURE(!std::isnan(score) && !std::isinf(score));
+    ENSURE(score < 0.0f);
 
-    assert(model.ScoreString(indexer, "") == 0.0f);
+    ENSURE(model.ScoreString(indexer, "") == 0.0f);
 
     // Test Japanese punctuation normalization
-    assert(indexer.Char2Index(0xFF0C) == indexer.Char2Index(0x3001));  // '，' == '、'
-    assert(indexer.Char2Index(0xFF0E) == indexer.Char2Index(0x3002));  // '．' == '。'
-    assert(indexer.Char2Index(0xFF64) == indexer.Char2Index(0x3001));  // '､' == '、'
-    assert(indexer.Char2Index(0xFF61) == indexer.Char2Index(0x3002));  // '｡' == '。'
+    ENSURE(indexer.Char2Index(0xFF0C) == indexer.Char2Index(0x3001));  // '，' == '、'
+    ENSURE(indexer.Char2Index(0xFF0E) == indexer.Char2Index(0x3002));  // '．' == '。'
+    ENSURE(indexer.Char2Index(0xFF64) == indexer.Char2Index(0x3001));  // '､' == '、'
+    ENSURE(indexer.Char2Index(0xFF61) == indexer.Char2Index(0x3002));  // '｡' == '。'
 
     float score_touten = model.ScoreString(indexer, "今日は、良い天気ですね。");
     float score_comma = model.ScoreString(indexer, "今日は，良い天気ですね．");
@@ -268,11 +314,11 @@ void TestGruContextCaching()
 
     charindex::CharIndex indexer;
     std::string chardata_path = FindDataFile("chardata.bin");
-    assert(indexer.LoadFile(chardata_path));
+    ENSURE(indexer.LoadFile(chardata_path));
 
     gruscorer::GruModel model;
     std::string model_path = FindDataFile("dummy_model.bin");
-    assert(model.LoadModel(model_path));
+    ENSURE(model.LoadModel(model_path));
 
     const std::string full_text = "今日は良い天気";
     float score_full = model.ScoreString(indexer, full_text, nullptr, false);
@@ -292,8 +338,8 @@ void TestGruContextCaching()
     const std::string suffix = "良い天気";
     float score_prefix = model.ScoreString(indexer, prefix, nullptr, false);
     auto ctx = model.ComputeContext(indexer, prefix);
-    assert(!ctx.is_empty);
-    assert(ctx.h.size() == model.hidden_size());
+    ENSURE(!ctx.is_empty);
+    ENSURE(ctx.h.size() == model.hidden_size());
 
     float score_suffix = model.ScoreStringWithContext(indexer, suffix, ctx, false);
     AssertNear(score_full, score_prefix + score_suffix, 1e-4f, "Chain rule log P(AB) == log P(A) + log P(B|A)");
@@ -301,7 +347,7 @@ void TestGruContextCaching()
     // 4. Punctuation normalization context consistency
     auto ctx_touten = model.ComputeContext(indexer, "今日は、");
     auto ctx_comma = model.ComputeContext(indexer, "今日は，");
-    assert(ctx_comma.last_token == ctx_touten.last_token);
+    ENSURE(ctx_comma.last_token == ctx_touten.last_token);
     for (size_t i = 0; i < model.hidden_size(); ++i) {
         AssertNear(ctx_comma.h[i], ctx_touten.h[i], 1e-5f, "Context h with '，' must match '、'");
     }
@@ -315,11 +361,11 @@ void TestOnlineTrainingAndPersistence()
 
     charindex::CharIndex indexer;
     std::string chardata_path = FindDataFile("chardata.bin");
-    assert(indexer.LoadFile(chardata_path));
+    ENSURE(indexer.LoadFile(chardata_path));
 
     gruscorer::GruModel model;
     std::string model_path = FindDataFile("dummy_model.bin");
-    assert(model.LoadModel(model_path));
+    ENSURE(model.LoadModel(model_path));
 
     const std::string prefix = "今日は";
     const std::string target = "良い天気ですね";
@@ -338,7 +384,7 @@ void TestOnlineTrainingAndPersistence()
     AssertNear(pre_step1, base_score, 1e-4f, "Pre-update score returned by TrainOnStringWithContext");
 
     const float after_step1 = model.ScoreStringWithContext(indexer, target, ctx0, true);
-    assert(after_step1 > base_score && "Output-only training must improve target log-probability");
+    ENSURE(after_step1 > base_score && "Output-only training must improve target log-probability");
 
     // Verify that prefix hidden context is unchanged in OutputOnly mode
     auto ctx_after_out = model.ComputeContext(indexer, prefix);
@@ -348,9 +394,9 @@ void TestOnlineTrainingAndPersistence()
     }
 
     // 2. Test RevertLastTrainStep
-    assert(model.has_revert_snapshot());
-    assert(model.RevertLastTrainStep());
-    assert(!model.has_revert_snapshot());
+    ENSURE(model.has_revert_snapshot());
+    ENSURE(model.RevertLastTrainStep());
+    ENSURE(!model.has_revert_snapshot());
     const float reverted_score = model.ScoreStringWithContext(indexer, target, ctx0, true);
     AssertNear(reverted_score, base_score, 1e-5f, "RevertLastTrainStep must restore exact pre-step score");
 
@@ -368,7 +414,7 @@ void TestOnlineTrainingAndPersistence()
         model.TrainOnStringWithContext(indexer, target, step_ctx, full_cfg);
         auto new_ctx = model.ComputeContext(indexer, prefix);
         float new_score = model.ScoreStringWithContext(indexer, target, new_ctx, true);
-        assert(new_score > prev_score && "Full BPTT training must monotonically improve score");
+        ENSURE(new_score > prev_score && "Full BPTT training must monotonically improve score");
         prev_score = new_score;
     }
 
@@ -379,16 +425,16 @@ void TestOnlineTrainingAndPersistence()
     {
         h_diff += std::fabs(ctx_after_full.h[i] - ctx0.h[i]);
     }
-    assert(h_diff > 1e-6f && "Full BPTT must update GRU / embedding weights");
+    ENSURE(h_diff > 1e-6f && "Full BPTT must update GRU / embedding weights");
 
     // 4. Test SaveModel & LoadUserWeights
     const char *tmpdir = std::getenv("TEST_TMPDIR");
     std::string user_model_path = (tmpdir ? std::string(tmpdir) : "/tmp") + "/test_grumodel_user.bin";
-    assert(model.SaveModel(user_model_path));
+    ENSURE(model.SaveModel(user_model_path));
 
     gruscorer::GruModel reloaded_model;
-    assert(reloaded_model.LoadModel(model_path));
-    assert(reloaded_model.LoadUserWeights(user_model_path));
+    ENSURE(reloaded_model.LoadModel(model_path));
+    ENSURE(reloaded_model.LoadUserWeights(user_model_path));
 
     auto reloaded_ctx = reloaded_model.ComputeContext(indexer, prefix);
     const float reloaded_score = reloaded_model.ScoreStringWithContext(indexer, target, reloaded_ctx, true);
@@ -413,8 +459,8 @@ void TestOnlineTrainingAndPersistence()
         fs.write(reinterpret_cast<const char *>(&tweaked_val), sizeof(float));
     }
     gruscorer::GruModel new_base_model;
-    assert(new_base_model.LoadModel(different_base_path));
-    assert(!new_base_model.LoadUserWeights(user_model_path) &&
+    ENSURE(new_base_model.LoadModel(different_base_path));
+    ENSURE(!new_base_model.LoadUserWeights(user_model_path) &&
            "LoadUserWeights must reject user weights derived from a different base model");
 
     std::error_code ec;
@@ -431,6 +477,15 @@ void BenchmarkInference()
     gruscorer::GruModel model;
     std::string model_path = FindDataFile("dummy_model.bin");
     model.LoadModel(model_path);
+
+#if defined(__x86_64__) || defined(_M_X64)
+    std::cout << "  - Architecture: x86_64, AVX2+FMA: " << (gruscorer::math::HasAvx2Fma() ? "YES" : "NO") << std::endl;
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    std::cout << "  - Architecture: ARM64 (NEON active)" << std::endl;
+    std::cout << "  - ARMv8.2-A FP16 vector arithmetic: " << (gruscorer::math::HasArmFp16() ? "YES" : "NO") << std::endl;
+    std::cout << "  - Model FP16 active: " << (model.is_fp16_active() ? "YES" : "NO") << std::endl;
+#endif
+    std::cout << "  - Precomputed input gates: " << (model.has_precomputed_input_gates() ? "YES" : "NO") << std::endl;
 
     const size_t H = model.hidden_size();
     const size_t V = model.vocab_size();

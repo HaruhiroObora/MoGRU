@@ -237,11 +237,14 @@ public:
     bool is_loaded() const noexcept { return is_loaded_; }
     uint32_t vocab_size() const noexcept { return vocab_size_; }
     uint32_t hidden_size() const noexcept { return hidden_size_; }
+    bool is_fp16_active() const noexcept { return use_fp16_; }
+    bool has_precomputed_input_gates() const noexcept { return precomputed_gi_ != nullptr; }
 
 private:
     struct AlignedDeleter
     {
         void operator()(float *ptr) const noexcept;
+        void operator()(uint16_t *ptr) const noexcept;
     };
 
     /**
@@ -251,8 +254,20 @@ private:
                         const float *h_prev,
                         float *h_next) const;
 
+    /**
+     * @brief Precomputes W_ih * e_v + b_ih for all tokens v in [0, vocab_size - 1].
+     * Eliminates ~200,000 FLOPs (Gemv for input gates) per GRU inference step.
+     */
+    void InitPrecomputedInputGates();
+
+    /**
+     * @brief Converts w_out_ to FP16 representation on ARM64 platforms supporting native FP16.
+     */
+    void InitFp16Weights();
+
     bool is_loaded_ = false;
     bool has_revert_snapshot_ = false;
+    bool use_fp16_ = false;
     uint32_t vocab_size_ = 0;
     uint32_t hidden_size_ = 0;
     size_t total_elements_ = 0;
@@ -261,6 +276,12 @@ private:
     std::unique_ptr<float[], AlignedDeleter> weights_buffer_;
     std::unique_ptr<float[], AlignedDeleter> base_weights_buffer_;
     std::unique_ptr<float[], AlignedDeleter> revert_weights_buffer_;
+
+    // Precomputed input gates: gi(v) = W_ih * e_v + b_ih for each v in [0, vocab_size - 1]
+    std::unique_ptr<float[], AlignedDeleter> precomputed_gi_;
+
+    // FP16 weights for output projection: w_out_ [vocab_size * hidden_size]
+    std::unique_ptr<uint16_t[], AlignedDeleter> w_out_fp16_;
 
     // Pointers into weights_buffer_
     float *w_emb_ = nullptr; // [vocab_size, hidden_size]
