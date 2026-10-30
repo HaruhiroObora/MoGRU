@@ -7,7 +7,7 @@ MoGRU components.
 ## One-time setup on a Mac
 
 1. Install GitHub CLI (`gh`) and authenticate it with `gh auth login`.
-2. Clone `lambda-haru/MoGRU` and check out the development branch.
+2. Clone `Harumaru169/MoGRU` and check out the development branch.
 3. Install MoGRU once and select it in macOS Input Sources. The first
    registration may require logging out and back in.
 

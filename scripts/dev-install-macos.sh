@@ -17,9 +17,10 @@ done
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+ci_repo="Harumaru169/MoGRU"
 remote_url="$(git remote get-url origin)"
 case "$remote_url" in
-  git@github.com:lambda-haru/MoGRU.git|https://github.com/lambda-haru/MoGRU.git) ;;
+  git@github.com:Harumaru169/MoGRU.git|https://github.com/Harumaru169/MoGRU.git) ;;
   *) echo "Unexpected origin: $remote_url" >&2; exit 1 ;;
 esac
 
@@ -43,7 +44,7 @@ echo "Installing MoGRU $commit ($artifact_name)"
 
 run_id=""
 for ((attempt=0; attempt<60; attempt++)); do
-  run_id="$(gh run list -R lambda-haru/MoGRU -w macos.yaml -c "$commit" \
+  run_id="$(gh run list -R "$ci_repo" -w macos.yaml -c "$commit" \
     --json databaseId --jq '.[0].databaseId // empty')"
   [[ -n "$run_id" ]] && break
   sleep 10
@@ -53,7 +54,7 @@ if [[ -z "$run_id" ]]; then
   exit 1
 fi
 
-actual_commit="$(gh run view "$run_id" -R lambda-haru/MoGRU \
+actual_commit="$(gh run view "$run_id" -R "$ci_repo" \
   --json headSha --jq '.headSha')"
 if [[ "$actual_commit" != "$commit" ]]; then
   echo "CI commit mismatch: expected $commit, got $actual_commit" >&2
@@ -62,7 +63,7 @@ fi
 
 echo "Waiting for CI run $run_id, job $job_name ..."
 for ((attempt=0; attempt<540; attempt++)); do
-  job_state="$(gh run view "$run_id" -R lambda-haru/MoGRU --json jobs \
+  job_state="$(gh run view "$run_id" -R "$ci_repo" --json jobs \
     --jq ".jobs[] | select(.name == \"$job_name\") | [.status, .conclusion] | @tsv")"
   case "$job_state" in
     $'completed\tsuccess') break ;;
@@ -77,7 +78,7 @@ fi
 
 download_dir="$(mktemp -d)"
 trap 'rm -rf "$download_dir"' EXIT
-gh run download "$run_id" -R lambda-haru/MoGRU -n "$artifact_name" -D "$download_dir"
+gh run download "$run_id" -R "$ci_repo" -n "$artifact_name" -D "$download_dir"
 package="$(find "$download_dir" -type d -name 'MoGRU.pkg' -print -quit)"
 if [[ -z "$package" ]]; then
   package="$(find "$download_dir" -type f -name 'MoGRU.pkg' -print -quit)"
