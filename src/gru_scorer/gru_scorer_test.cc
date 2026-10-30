@@ -35,9 +35,30 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <vector>
+
+#if defined(_WIN32) || defined(_MSC_VER)
+inline int setenv(const char *name, const char *value, int overwrite)
+{
+    if (!overwrite)
+    {
+        size_t envsize = 0;
+        if (_dupenv_s(nullptr, &envsize, name) == 0 && envsize > 0)
+        {
+            return 0;
+        }
+    }
+    return _putenv_s(name, value);
+}
+
+inline int unsetenv(const char *name)
+{
+    return _putenv_s(name, "");
+}
+#endif
 
 void AssertNear(float actual, float expected, float tolerance = 1e-4f, const std::string &msg = "")
 {

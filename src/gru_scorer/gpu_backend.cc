@@ -810,9 +810,23 @@ std::unique_ptr<GruGpuBackend> GruGpuBackend::Create(size_t vocab_size, size_t h
 {
     // Check environment variable MOGRU_USE_GPU
     const char *env_gpu = std::getenv("MOGRU_USE_GPU");
-    if (!env_gpu)
+    if (!env_gpu || env_gpu[0] == '\0')
     {
         env_gpu = std::getenv("MOZC_GRU_USE_GPU");
+    }
+    if (env_gpu && env_gpu[0] == '\0')
+    {
+        env_gpu = nullptr;
+    }
+
+    if (env_gpu)
+    {
+        std::string mode(env_gpu);
+        std::transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+        if (mode == "0" || mode == "false" || mode == "off" || mode == "disable")
+        {
+            return nullptr;
+        }
     }
 
     // Try OpenCL Dynamic Loader
