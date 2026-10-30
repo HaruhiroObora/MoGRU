@@ -112,6 +112,12 @@ bazel_dep(
     repo_name = "build_bazel_rules_apple",
 )
 
+# SwiftUI candidate renderer for the macOS input method.
+bazel_dep(
+    name = "rules_swift",
+    version = "4.2.2",
+)
+
 # apple_support: 2.4.0 2026-03-27
 # https://github.com/bazelbuild/apple_support/
 ## this must come above 'rules_cc'

@@ -43,7 +43,8 @@ namespace mozc {
 namespace renderer {
 namespace mac {
 
-RendererBaseWindow::RendererBaseWindow() : window_level_(NSPopUpMenuWindowLevel) {}
+RendererBaseWindow::RendererBaseWindow()
+    : window_(nil), view_(nil), window_level_(NSPopUpMenuWindowLevel) {}
 
 void RendererBaseWindow::InitWindow() {
   if (window_) {
