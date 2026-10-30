@@ -43,6 +43,9 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 .\install.ps1
 ```
 
+> [!TIP]
+> 再起動を求めるダイアログが表示される場合がありますが，その場で再起動するとスクリプトの実行が完了しないため，後で再起動を選択してください．
+
 <details>
 <summary>ソースコードから自前ビルドする場合（開発者向け）</summary>
 
