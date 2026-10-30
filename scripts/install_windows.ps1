@@ -46,6 +46,7 @@ if (-not $isAdmin) {
 
 $MsiPath = ""
 $TempExtractDir = ""
+$PrebuiltModelsDir = ""
 
 try {
     if ($PrebuiltArg) {
@@ -64,6 +65,10 @@ try {
                 Write-Error "[!] No .msi installer found inside directory: $ResolvedPath"
                 exit 1
             }
+            $FoundModels = Get-ChildItem -Path $ResolvedPath -Filter "models" -Directory -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($FoundModels) {
+                $PrebuiltModelsDir = $FoundModels.FullName
+            }
         } elseif ($ResolvedPath -match '\.zip$') {
             $TempExtractDir = Join-Path ([System.IO.Path]::GetTempPath()) ("mogru_install_" + [guid]::NewGuid().ToString("N"))
             Write-Host "[+] Extracting CI artifact archive: $ResolvedPath" -ForegroundColor Cyan
@@ -74,6 +79,10 @@ try {
             } else {
                 Write-Error "[!] No .msi installer found inside archive: $ResolvedPath"
                 exit 1
+            }
+            $FoundModels = Get-ChildItem -Path $TempExtractDir -Filter "models" -Directory -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($FoundModels) {
+                $PrebuiltModelsDir = $FoundModels.FullName
             }
         } else {
             $MsiPath = $ResolvedPath
@@ -177,58 +186,64 @@ try {
         Write-Error "msiexec.exe failed with exit code $($Process.ExitCode)."
         exit $Process.ExitCode
     }
+
+    # 6. Copy GRU model files to AppData\LocalLow\MoGRU
+    $CandidateModelDirs = @(
+        $PrebuiltModelsDir,
+        (Join-Path $ScriptDir "models"),
+        (Join-Path $RepoRoot "models"),
+        (Join-Path (Get-Location) "models")
+    ) | Where-Object { $_ -and (Test-Path $_) }
+
+    $ModelsDir = ""
+    foreach ($dir in $CandidateModelDirs) {
+        if ((Test-Path (Join-Path $dir "grumodel.bin")) -or (Test-Path (Join-Path $dir "grumodel_new.bin"))) {
+            $ModelsDir = $dir
+            break
+        }
+    }
+
+    $TargetDirs = @(
+        (Join-Path $env:USERPROFILE "AppData\LocalLow\MoGRU")
+    )
+
+    if ($ModelsDir) {
+        Write-Host "[+] Found model directory at: $ModelsDir" -ForegroundColor Green
+        foreach ($ModelDestDir in $TargetDirs) {
+            if (-not (Test-Path $ModelDestDir)) {
+                New-Item -ItemType Directory -Path $ModelDestDir -Force | Out-Null
+            }
+
+            # Copy all *.bin model files (grumodel.bin, chardata.bin, grumodel_new.bin, chardata_new.bin, etc.)
+            $BinFiles = Get-ChildItem -Path $ModelsDir -Filter "*.bin" -ErrorAction SilentlyContinue
+            foreach ($bin in $BinFiles) {
+                Write-Host "[+] Copying model file: $($bin.Name) -> $ModelDestDir" -ForegroundColor Green
+                Copy-Item -Path $bin.FullName -Destination $ModelDestDir -Force
+            }
+
+            # Copy or upgrade gru_config.ini
+            $ConfigSrc = Join-Path $ModelsDir "gru_config.ini"
+            $ConfigDest = Join-Path $ModelDestDir "gru_config.ini"
+            if (Test-Path $ConfigSrc) {
+                if (-not (Test-Path $ConfigDest)) {
+                    Write-Host "[+] Initializing $ConfigDest from default template ..." -ForegroundColor Green
+                    Copy-Item -Path $ConfigSrc -Destination $ConfigDest -Force
+                } else {
+                    $ExistingContent = Get-Content -Path $ConfigDest -Raw -ErrorAction SilentlyContinue
+                    if ($ExistingContent -and (($ExistingContent -match "katakana_penalty") -or ($ExistingContent -notmatch "enable_live_conversion"))) {
+                        Write-Host "[+] Upgrading $ConfigDest to unified MoGRU config format (backup saved to $ConfigDest.bak) ..." -ForegroundColor Green
+                        Copy-Item -Path $ConfigDest -Destination "$ConfigDest.bak" -Force
+                        Copy-Item -Path $ConfigSrc -Destination $ConfigDest -Force
+                    }
+                }
+            }
+        }
+    } else {
+        Write-Warning "[!] No GRU model directory found. Searched: $($CandidateModelDirs -join ', ')"
+    }
 } finally {
     if ($TempExtractDir -and (Test-Path -LiteralPath $TempExtractDir)) {
         Remove-Item -LiteralPath $TempExtractDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
-}
-
-# 6. Copy GRU model files to AppData\LocalLow\MoGRU
-$ModelSrc = Join-Path $ScriptDir "models\grumodel.bin"
-$ChardataSrc = Join-Path $ScriptDir "models\chardata.bin"
-$ConfigSrc = Join-Path $ScriptDir "models\gru_config.ini"
-
-if (-not (Test-Path $ModelSrc)) {
-    $ModelSrc = Join-Path $RepoRoot "models\grumodel.bin"
-    $ChardataSrc = Join-Path $RepoRoot "models\chardata.bin"
-    $ConfigSrc = Join-Path $RepoRoot "models\gru_config.ini"
-}
-
-$TargetDirs = @(
-    (Join-Path $env:USERPROFILE "AppData\LocalLow\MoGRU")
-)
-
-foreach ($ModelDestDir in $TargetDirs) {
-    if (-not (Test-Path $ModelDestDir)) {
-        New-Item -ItemType Directory -Path $ModelDestDir -Force | Out-Null
-    }
-
-    if ((Test-Path $ModelSrc) -and (Test-Path $ChardataSrc)) {
-        Write-Host "[+] Copying GRU models to $ModelDestDir ..." -ForegroundColor Green
-        Copy-Item -Path $ModelSrc -Destination $ModelDestDir -Force
-        Copy-Item -Path $ChardataSrc -Destination $ModelDestDir -Force
-        $NewModelSrc = Join-Path (Split-Path $ModelSrc) "grumodel_new.bin"
-        $NewChardataSrc = Join-Path (Split-Path $ChardataSrc) "chardata_new.bin"
-        if ((Test-Path $NewModelSrc) -and (Test-Path $NewChardataSrc)) {
-            Write-Host "[+] Copying high-accuracy (H=256) models to $ModelDestDir ..." -ForegroundColor Green
-            Copy-Item -Path $NewModelSrc -Destination $ModelDestDir -Force
-            Copy-Item -Path $NewChardataSrc -Destination $ModelDestDir -Force
-        }
-    }
-
-    $ConfigDest = Join-Path $ModelDestDir "gru_config.ini"
-    if (Test-Path $ConfigSrc) {
-        if (-not (Test-Path $ConfigDest)) {
-            Write-Host "[+] Initializing $ConfigDest from default template ..." -ForegroundColor Green
-            Copy-Item -Path $ConfigSrc -Destination $ConfigDest -Force
-        } else {
-            $ExistingContent = Get-Content -Path $ConfigDest -Raw -ErrorAction SilentlyContinue
-            if ($ExistingContent -and (($ExistingContent -match "katakana_penalty") -or ($ExistingContent -notmatch "enable_live_conversion"))) {
-                Write-Host "[+] Upgrading $ConfigDest to unified MoGRU config format (backup saved to $ConfigDest.bak) ..." -ForegroundColor Green
-                Copy-Item -Path $ConfigDest -Destination "$ConfigDest.bak" -Force
-                Copy-Item -Path $ConfigSrc -Destination $ConfigDest -Force
-            }
-        }
     }
 }
 

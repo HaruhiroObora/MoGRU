@@ -529,6 +529,18 @@ inline void ConvertFp32ToFp16(const float *src, __fp16 *dst, size_t n) noexcept
 #if defined(__clang__) || defined(__GNUC__)
 __attribute__((target("+fp16")))
 #endif
+inline float ReduceFp16x8(float16x8_t v) noexcept
+{
+    float16x4_t lo = vget_low_f16(v);
+    float16x4_t hi = vget_high_f16(v);
+    float32x4_t lo32 = vcvt_f32_f16(lo);
+    float32x4_t hi32 = vcvt_f32_f16(hi);
+    return vaddvq_f32(vaddq_f32(lo32, hi32));
+}
+
+#if defined(__clang__) || defined(__GNUC__)
+__attribute__((target("+fp16")))
+#endif
 inline void GemvNeonFp16(const __fp16 *W, const __fp16 *x, const float *b, float *y, size_t rows, size_t cols) noexcept
 {
     size_t r = 0;
@@ -566,20 +578,14 @@ inline void GemvNeonFp16(const __fp16 *W, const __fp16 *x, const float *b, float
             acc7 = vfmaq_f16(acc7, vld1q_f16(&w7[c]), vx);
         }
 
-        auto reduce_f16 = [](float16x8_t v) noexcept -> float {
-            float16x4_t lo = vget_low_f16(v);
-            float16x4_t hi = vget_high_f16(v);
-            return vaddvq_f32(vcvt_f32_f16(vadd_f16(lo, hi)));
-        };
-
-        float s0 = reduce_f16(acc0);
-        float s1 = reduce_f16(acc1);
-        float s2 = reduce_f16(acc2);
-        float s3 = reduce_f16(acc3);
-        float s4 = reduce_f16(acc4);
-        float s5 = reduce_f16(acc5);
-        float s6 = reduce_f16(acc6);
-        float s7 = reduce_f16(acc7);
+        float s0 = ReduceFp16x8(acc0);
+        float s1 = ReduceFp16x8(acc1);
+        float s2 = ReduceFp16x8(acc2);
+        float s3 = ReduceFp16x8(acc3);
+        float s4 = ReduceFp16x8(acc4);
+        float s5 = ReduceFp16x8(acc5);
+        float s6 = ReduceFp16x8(acc6);
+        float s7 = ReduceFp16x8(acc7);
 
         for (; c < cols; ++c)
         {
@@ -625,9 +631,7 @@ inline void GemvNeonFp16(const __fp16 *W, const __fp16 *x, const float *b, float
         {
             acc = vfmaq_f16(acc, vld1q_f16(&wr[c]), vld1q_f16(&x[c]));
         }
-        float16x4_t lo = vget_low_f16(acc);
-        float16x4_t hi = vget_high_f16(acc);
-        float s = vaddvq_f32(vcvt_f32_f16(vadd_f16(lo, hi)));
+        float s = ReduceFp16x8(acc);
         for (; c < cols; ++c)
         {
             s += static_cast<float>(wr[c]) * static_cast<float>(x[c]);

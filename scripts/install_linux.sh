@@ -468,36 +468,48 @@ fi
 
 # Copy GRU model weights and vocabulary to ~/.config/mogru/
 SOURCE_MODELS_DIR=""
-if [ -f "$REPO_ROOT/models/grumodel.bin" ] && [ -f "$REPO_ROOT/models/chardata.bin" ]; then
+if [ -d "$REPO_ROOT/models" ] && [ -f "$REPO_ROOT/models/grumodel.bin" ]; then
   SOURCE_MODELS_DIR="$REPO_ROOT/models"
-elif [ -n "$PREBUILT_MODELS_DIR" ] && [ -f "$PREBUILT_MODELS_DIR/grumodel.bin" ]; then
+elif [ -d "$SCRIPT_DIR/models" ] && [ -f "$SCRIPT_DIR/models/grumodel.bin" ]; then
+  SOURCE_MODELS_DIR="$SCRIPT_DIR/models"
+elif [ -n "$PREBUILT_MODELS_DIR" ] && [ -d "$PREBUILT_MODELS_DIR" ]; then
   SOURCE_MODELS_DIR="$PREBUILT_MODELS_DIR"
+elif [ -d "./models" ] && [ -f "./models/grumodel.bin" ]; then
+  SOURCE_MODELS_DIR="./models"
 fi
 
 if [ -n "$SOURCE_MODELS_DIR" ]; then
-  echo "[+] Copying default model files to ~/.config/mogru/ from $SOURCE_MODELS_DIR ..."
-  cp -f "$SOURCE_MODELS_DIR/grumodel.bin" "$HOME/.config/mogru/"
-  cp -f "$SOURCE_MODELS_DIR/chardata.bin" "$HOME/.config/mogru/"
-  if [ -f "$SOURCE_MODELS_DIR/grumodel_new.bin" ] && [ -f "$SOURCE_MODELS_DIR/chardata_new.bin" ]; then
-    echo "[+] Copying high-accuracy (H=256) model files to ~/.config/mogru/ ..."
-    cp -f "$SOURCE_MODELS_DIR/grumodel_new.bin" "$HOME/.config/mogru/"
-    cp -f "$SOURCE_MODELS_DIR/chardata_new.bin" "$HOME/.config/mogru/"
-  fi
+  echo "[+] Copying model files to ~/.config/mogru/ from $SOURCE_MODELS_DIR ..."
+  for bin_file in "$SOURCE_MODELS_DIR"/*.bin; do
+    if [ -f "$bin_file" ]; then
+      echo "    - $(basename "$bin_file")"
+      cp -f "$bin_file" "$HOME/.config/mogru/"
+    fi
+  done
 fi
 
 # Deploy default gru_config.ini if not already existing or upgrade legacy format
 TARGET_INI="$HOME/.config/mogru/gru_config.ini"
+CONFIG_SRC=""
+if [ -n "$SOURCE_MODELS_DIR" ] && [ -f "$SOURCE_MODELS_DIR/gru_config.ini" ]; then
+  CONFIG_SRC="$SOURCE_MODELS_DIR/gru_config.ini"
+elif [ -f "$REPO_ROOT/models/gru_config.ini" ]; then
+  CONFIG_SRC="$REPO_ROOT/models/gru_config.ini"
+fi
+
 if [ ! -f "$TARGET_INI" ]; then
-  if [ -n "$SOURCE_MODELS_DIR" ] && [ -f "$SOURCE_MODELS_DIR/gru_config.ini" ]; then
+  if [ -n "$CONFIG_SRC" ]; then
     echo "[+] Initializing $TARGET_INI from default template ..."
-    cp "$SOURCE_MODELS_DIR/gru_config.ini" "$TARGET_INI"
+    cp "$CONFIG_SRC" "$TARGET_INI"
   fi
 else
   # Check if existing ini is legacy format or lacks enable_live_conversion
   if grep -q "katakana_penalty" "$TARGET_INI" || ! grep -q "enable_live_conversion" "$TARGET_INI"; then
     echo "[+] Upgrading $TARGET_INI to unified MoGRU config format (backup saved to $TARGET_INI.bak) ..."
     cp "$TARGET_INI" "$TARGET_INI.bak"
-    cp "$REPO_ROOT/models/gru_config.ini" "$TARGET_INI"
+    if [ -n "$CONFIG_SRC" ]; then
+      cp "$CONFIG_SRC" "$TARGET_INI"
+    fi
   else
     echo "[*] Preserving existing configuration: $TARGET_INI"
   fi

@@ -46,6 +46,7 @@ fi
 
 SOURCE_PKG=""
 SOURCE_APP=""
+PREBUILT_MODELS_DIR=""
 TEMP_EXTRACT_DIR=""
 cleanup() {
   if [ -n "$TEMP_EXTRACT_DIR" ] && [ -d "$TEMP_EXTRACT_DIR" ]; then
@@ -68,6 +69,7 @@ if [ -n "$PREBUILT_ARG" ]; then
       unzip -q "$ABS_FILE" -d "$TEMP_EXTRACT_DIR"
       FOUND_PKG="$(find "$TEMP_EXTRACT_DIR" -name "*.pkg" -print -quit 2>/dev/null || true)"
       FOUND_APP="$(find "$TEMP_EXTRACT_DIR" -name "*.app" -type d -print -quit 2>/dev/null || true)"
+      FOUND_MODELS="$(find "$TEMP_EXTRACT_DIR" -type d -name "models" -print -quit 2>/dev/null || true)"
       if [ -n "$FOUND_PKG" ]; then
         SOURCE_PKG="$FOUND_PKG"
       elif [ -n "$FOUND_APP" ]; then
@@ -75,6 +77,9 @@ if [ -n "$PREBUILT_ARG" ]; then
       else
         echo "[!] No .pkg or .app found inside archive: $ABS_FILE"
         exit 1
+      fi
+      if [ -n "$FOUND_MODELS" ]; then
+        PREBUILT_MODELS_DIR="$FOUND_MODELS"
       fi
     else
       SOURCE_PKG="$ABS_FILE"
@@ -88,6 +93,7 @@ if [ -n "$PREBUILT_ARG" ]; then
     else
       FOUND_PKG="$(find "$ABS_DIR" -maxdepth 2 -name "*.pkg" -print -quit 2>/dev/null || true)"
       FOUND_APP="$(find "$ABS_DIR" -maxdepth 2 -name "*.app" -type d -print -quit 2>/dev/null || true)"
+      FOUND_MODELS="$(find "$ABS_DIR" -type d -name "models" -print -quit 2>/dev/null || true)"
       if [ -n "$FOUND_PKG" ]; then
         SOURCE_PKG="$FOUND_PKG"
       elif [ -n "$FOUND_APP" ]; then
@@ -95,6 +101,9 @@ if [ -n "$PREBUILT_ARG" ]; then
       else
         echo "[!] No .pkg or .app found inside directory: $ABS_DIR"
         exit 1
+      fi
+      if [ -n "$FOUND_MODELS" ]; then
+        PREBUILT_MODELS_DIR="$FOUND_MODELS"
       fi
     fi
   fi
@@ -180,10 +189,14 @@ echo "=== Installing MoGRU ==="
 
 # Copy GRU model files and default configuration to user profile directory
 SOURCE_MODELS_DIR=""
-if [ -f "$REPO_ROOT/models/grumodel.bin" ] && [ -f "$REPO_ROOT/models/chardata.bin" ]; then
+if [ -d "$REPO_ROOT/models" ] && [ -f "$REPO_ROOT/models/grumodel.bin" ]; then
   SOURCE_MODELS_DIR="$REPO_ROOT/models"
-elif [ -f "$SCRIPT_DIR/models/grumodel.bin" ] && [ -f "$SCRIPT_DIR/models/chardata.bin" ]; then
+elif [ -d "$SCRIPT_DIR/models" ] && [ -f "$SCRIPT_DIR/models/grumodel.bin" ]; then
   SOURCE_MODELS_DIR="$SCRIPT_DIR/models"
+elif [ -n "$PREBUILT_MODELS_DIR" ] && [ -d "$PREBUILT_MODELS_DIR" ]; then
+  SOURCE_MODELS_DIR="$PREBUILT_MODELS_DIR"
+elif [ -d "./models" ] && [ -f "./models/grumodel.bin" ]; then
+  SOURCE_MODELS_DIR="./models"
 fi
 
 for dir in \
@@ -191,22 +204,32 @@ for dir in \
   "$HOME/.config/mogru"; do
   mkdir -p "$dir"
   if [ -n "$SOURCE_MODELS_DIR" ]; then
-    cp -f "$SOURCE_MODELS_DIR/grumodel.bin" "$dir/"
-    cp -f "$SOURCE_MODELS_DIR/chardata.bin" "$dir/"
-    if [ -f "$SOURCE_MODELS_DIR/grumodel_new.bin" ] && [ -f "$SOURCE_MODELS_DIR/chardata_new.bin" ]; then
-      cp -f "$SOURCE_MODELS_DIR/grumodel_new.bin" "$dir/"
-      cp -f "$SOURCE_MODELS_DIR/chardata_new.bin" "$dir/"
-    fi
+    echo "[+] Copying model files to $dir from $SOURCE_MODELS_DIR ..."
+    for bin_file in "$SOURCE_MODELS_DIR"/*.bin; do
+      if [ -f "$bin_file" ]; then
+        echo "    - $(basename "$bin_file")"
+        cp -f "$bin_file" "$dir/"
+      fi
+    done
   fi
   TARGET_INI="$dir/gru_config.ini"
-  if [ ! -f "$TARGET_INI" ] && [ -n "$SOURCE_MODELS_DIR" ] && [ -f "$SOURCE_MODELS_DIR/gru_config.ini" ]; then
-    echo "[+] Initializing $TARGET_INI from default template ..."
-    cp "$SOURCE_MODELS_DIR/gru_config.ini" "$TARGET_INI"
+  CONFIG_SRC=""
+  if [ -n "$SOURCE_MODELS_DIR" ] && [ -f "$SOURCE_MODELS_DIR/gru_config.ini" ]; then
+    CONFIG_SRC="$SOURCE_MODELS_DIR/gru_config.ini"
+  elif [ -f "$REPO_ROOT/models/gru_config.ini" ]; then
+    CONFIG_SRC="$REPO_ROOT/models/gru_config.ini"
+  fi
+
+  if [ ! -f "$TARGET_INI" ]; then
+    if [ -n "$CONFIG_SRC" ]; then
+      echo "[+] Initializing $TARGET_INI from default template ..."
+      cp "$CONFIG_SRC" "$TARGET_INI"
+    fi
   elif [ -f "$TARGET_INI" ] && (grep -q "katakana_penalty" "$TARGET_INI" || ! grep -q "enable_live_conversion" "$TARGET_INI"); then
     echo "[+] Upgrading $TARGET_INI to unified MoGRU config format (backup saved to $TARGET_INI.bak) ..."
     cp "$TARGET_INI" "$TARGET_INI.bak"
-    if [ -n "$SOURCE_MODELS_DIR" ] && [ -f "$SOURCE_MODELS_DIR/gru_config.ini" ]; then
-      cp "$SOURCE_MODELS_DIR/gru_config.ini" "$TARGET_INI"
+    if [ -n "$CONFIG_SRC" ]; then
+      cp "$CONFIG_SRC" "$TARGET_INI"
     fi
   fi
 done
