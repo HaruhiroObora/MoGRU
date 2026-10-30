@@ -164,58 +164,6 @@ jobs:
             MoGRU-macOS-arm64.pkg
           if-no-files-found: error
 
-  build_macos_intel64:
-    name: Build macOS (Intel64)
-    runs-on: macos-26
-    timeout-minutes: 60
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Try to restore update_deps cache
-        uses: actions/cache@v4
-        with:
-          path: src/third_party_cache
-          key: update_deps-${{ runner.os }}-${{ hashFiles('src/build_tools/update_deps.py') }}
-
-      - name: Install dependencies
-        working-directory: ./src
-        run: |
-          python3 build_tools/update_deps.py
-
-      - name: Build Qt
-        working-directory: ./src
-        run: |
-          python3 build_tools/build_qt.py --release --confirm_license --macos_cpus=x86_64
-
-      - name: bazel build
-        working-directory: ./src
-        run: |
-          bazelisk build package --macos_cpus=x86_64 --config release_build
-
-      - name: Prepare MoGRU macOS Package
-        run: |
-          mkdir -p package_mac_x86/models
-          cp -f src/bazel-bin/mac/*.pkg package_mac_x86/
-          cp -f scripts/install_macos.sh package_mac_x86/install.sh
-          chmod 755 package_mac_x86/install.sh
-          cp -f models/*.bin package_mac_x86/models/ 2>/dev/null || true
-          cp -f models/*.ini package_mac_x86/models/ 2>/dev/null || true
-
-          mv package_mac_x86 MoGRU-macOS-intel64
-          zip -r MoGRU-macOS-intel64.zip MoGRU-macOS-intel64
-          cp -f src/bazel-bin/mac/*.pkg MoGRU-macOS-intel64.pkg
-
-      - name: Upload macOS Intel64 Release Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-macos-intel64
-          path: |
-            MoGRU-macOS-intel64.zip
-            MoGRU-macOS-intel64.pkg
-          if-no-files-found: error
-
   build_windows_x64:
     name: Build Windows (x64)
     runs-on: windows-2025
@@ -263,8 +211,7 @@ jobs:
           New-Item -ItemType Directory -Path package_win\models -Force | Out-Null
           Copy-Item src\bazel-bin\win32\installer\*.msi package_win\ -Force
           Copy-Item scripts\install_windows.ps1 package_win\install.ps1 -Force
-          Copy-Item models\*.bin package_win\models\ -Force -ErrorAction SilentlyContinue
-          Copy-Item models\*.ini package_win\models\ -Force -ErrorAction SilentlyContinue
+          Copy-Item -Path models\* -Destination package_win\models\ -Force -Recurse -ErrorAction SilentlyContinue
 
           Rename-Item package_win MoGRU-windows-x64
           Compress-Archive -Path MoGRU-windows-x64 -DestinationPath MoGRU-windows-x64.zip -Force
@@ -279,13 +226,75 @@ jobs:
             MoGRU-windows-x64.msi
           if-no-files-found: error
 
+  build_windows_arm64:
+    name: Build Windows (ARM64)
+    runs-on: windows-11-arm
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Try to restore update_deps cache
+        uses: actions/cache@v4
+        with:
+          path: src/third_party_cache
+          key: update_deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/build_tools/update_deps.py') }}
+
+      - name: Install Dependencies
+        shell: cmd
+        working-directory: .\src
+        run: |
+          python build_tools/update_deps.py
+
+      - name: Build Qt
+        shell: cmd
+        working-directory: .\src
+        run: |
+          python build_tools/build_qt.py --release --confirm_license
+
+      - name: Delete Qt src to save disk space
+        shell: cmd
+        working-directory: .\src
+        run: |
+          rmdir third_party\qt_src /s /q
+
+      - name: bazel build
+        shell: cmd
+        working-directory: .\src
+        env:
+          ANDROID_NDK_HOME: ""
+        run: |
+          bazelisk build package --config release_build
+
+      - name: Prepare MoGRU Windows ARM64 Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path package_win_arm64\models -Force | Out-Null
+          Copy-Item src\bazel-bin\win32\installer\*.msi package_win_arm64\ -Force
+          Copy-Item scripts\install_windows.ps1 package_win_arm64\install.ps1 -Force
+          Copy-Item -Path models\* -Destination package_win_arm64\models\ -Force -Recurse -ErrorAction SilentlyContinue
+
+          Rename-Item package_win_arm64 MoGRU-windows-arm64
+          Compress-Archive -Path MoGRU-windows-arm64 -DestinationPath MoGRU-windows-arm64.zip -Force
+          Copy-Item src\bazel-bin\win32\installer\*.msi MoGRU-windows-arm64.msi -Force
+
+      - name: Upload Windows ARM64 Release Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-arm64
+          path: |
+            MoGRU-windows-arm64.zip
+            MoGRU-windows-arm64.msi
+          if-no-files-found: error
+
   publish_release:
     name: Publish GitHub Release
     needs:
       - build_linux
       - build_macos_arm64
-      - build_macos_intel64
       - build_windows_x64
+      - build_windows_arm64
     runs-on: ubuntu-latest
     permissions:
       contents: write

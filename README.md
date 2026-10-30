@@ -32,13 +32,13 @@ cd MoGRU-linux
 
 ### macOS
 ```bash
-cd MoGRU-macOS-arm64  # Intel Mac: MoGRU-macOS-intel64
+cd MoGRU-macOS-arm64
 ./install.sh
 ```
 
 ### Windows (管理者 PowerShell)
 ```powershell
-cd MoGRU-windows-x64
+cd MoGRU-windows-x64  # ARM64: MoGRU-windows-arm64
 Set-ExecutionPolicy Bypass -Scope Process -Force
 .\install.ps1
 ```
