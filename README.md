@@ -47,16 +47,17 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 <summary>ソースコードから自前ビルドする場合（開発者向け）</summary>
 
 ```bash
-# Linux / macOS
-git clone https://github.com/lambda-haru/MoGRU.git
-cd MoGRU
-./install.sh
+# Linux (Fcitx5)
+cd src
+bazelisk build -c opt //unix/fcitx5:fcitx5-mogru.so //gui/tool:mozc_tool --//unix/fcitx5:use_server=False
 
-# Windows (管理者 PowerShell)
-git clone https://github.com/lambda-haru/MoGRU.git
-cd MoGRU
-Set-ExecutionPolicy Bypass -Scope Process -Force
-.\scripts\install_windows.ps1
+# macOS
+cd src
+bazelisk build package --config release_build
+
+# Windows (MSVC)
+cd src
+bazelisk build package --config release_build
 ```
 </details>
 

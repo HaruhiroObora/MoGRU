@@ -1,7 +1,9 @@
 # ==============================================================================
-# MoGRU Build & Install Script for Windows (PowerShell)
+# MoGRU Installer for Windows (PowerShell)
 # ==============================================================================
-# Run with: Set-ExecutionPolicy Bypass -Scope Process -Force; .\scripts\install_windows.ps1
+# Installs MoGRU from a prebuilt release package (zip, msi, or directory).
+# Run with: Set-ExecutionPolicy Bypass -Scope Process -Force; .\install.ps1
+# ==============================================================================
 
 $ErrorActionPreference = "Stop"
 
@@ -9,36 +11,46 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $ScriptDir
 
 Write-Host "=== MoGRU Installer for Windows ===" -ForegroundColor Cyan
-Write-Host "Repository Root: $RepoRoot"
 
-$PrebuiltArg = ""
+$PackageArg = ""
 for ($i = 0; $i -lt $args.Count; $i++) {
     if ($args[$i] -in @("-h", "--help", "-Help")) {
-        Write-Host "Usage: .\scripts\install_windows.ps1 [ [--binary | -Binary] <path-to-MoGRU64.msi-or-zip> ]"
+        Write-Host "Usage: .\install.ps1 [ <path-to-MoGRU-windows-x64.zip-or-msi-or-dir> ]"
+        Write-Host "       (When run inside extracted MoGRU package, arguments can be omitted)"
         exit 0
     } elseif ($args[$i] -in @("--binary", "-Binary", "-b")) {
         if ($i + 1 -lt $args.Count) {
-            $PrebuiltArg = $args[$i + 1]
+            $PackageArg = $args[$i + 1]
             $i++
+        }
+    } elseif (-not $PackageArg) {
+        $PackageArg = $args[$i]
+    }
+}
+
+if (-not $PackageArg) {
+    # Auto-detection when run without arguments inside extracted package or alongside zip
+    $LocalMsi = Get-ChildItem -Path $ScriptDir -Filter "*.msi" -ErrorAction SilentlyContinue | Select-Object -First 1
+    $LocalZip = Get-ChildItem -Path $ScriptDir -Filter "MoGRU-windows-*.zip" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($LocalMsi) {
+        $PackageArg = $LocalMsi.FullName
+        Write-Host "[+] Auto-detected MSI installer at: $($LocalMsi.FullName)" -ForegroundColor Green
+    } elseif ($LocalZip) {
+        $PackageArg = $LocalZip.FullName
+        Write-Host "[+] Auto-detected package archive at: $($LocalZip.FullName)" -ForegroundColor Green
+    } else {
+        # Check current directory
+        $CurrMsi = Get-ChildItem -Path "." -Filter "*.msi" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($CurrMsi) {
+            $PackageArg = $CurrMsi.FullName
         } else {
-            Write-Error "Missing argument for $($args[$i])"
+            Write-Error "[!] No MoGRU package (.zip or .msi) found. Please run this script inside an extracted package or specify the path to MoGRU-windows-x64.zip."
             exit 1
         }
-    } elseif (-not $PrebuiltArg) {
-        $PrebuiltArg = $args[$i]
     }
 }
 
-if (-not $PrebuiltArg) {
-    # Auto-detection when run without arguments inside an extracted standalone package
-    $LocalMsi = Get-ChildItem -Path $ScriptDir -Filter "*.msi" -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($LocalMsi) {
-        $PrebuiltArg = $LocalMsi.FullName
-        Write-Host "[+] Auto-detected standalone MSI installer in script directory: $($LocalMsi.Name)" -ForegroundColor Green
-    }
-}
-
-# 1. Check Administrator Rights (recommended for MSI installation)
+# Check Administrator Rights
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
     Write-Warning "Running without Administrator privileges. MSI installation may prompt for UAC elevation."
@@ -46,140 +58,59 @@ if (-not $isAdmin) {
 
 $MsiPath = ""
 $TempExtractDir = ""
-$PrebuiltModelsDir = ""
+$PackageModelsDir = ""
 
 try {
-    if ($PrebuiltArg) {
-        if (-not (Test-Path -LiteralPath $PrebuiltArg)) {
-            Write-Error "[!] Prebuilt installer not found: $PrebuiltArg"
-            exit 1
-        }
-        $ResolvedPath = (Resolve-Path -LiteralPath $PrebuiltArg).Path
-        $Item = Get-Item -LiteralPath $ResolvedPath
-
-        if ($Item.PSIsContainer) {
-            $FoundMsi = Get-ChildItem -Path $ResolvedPath -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($FoundMsi) {
-                $MsiPath = $FoundMsi.FullName
-            } else {
-                Write-Error "[!] No .msi installer found inside directory: $ResolvedPath"
-                exit 1
-            }
-            $FoundModels = Get-ChildItem -Path $ResolvedPath -Filter "models" -Directory -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($FoundModels) {
-                $PrebuiltModelsDir = $FoundModels.FullName
-            }
-        } elseif ($ResolvedPath -match '\.zip$') {
-            $TempExtractDir = Join-Path ([System.IO.Path]::GetTempPath()) ("mogru_install_" + [guid]::NewGuid().ToString("N"))
-            Write-Host "[+] Extracting CI artifact archive: $ResolvedPath" -ForegroundColor Cyan
-            Expand-Archive -LiteralPath $ResolvedPath -DestinationPath $TempExtractDir -Force
-            $FoundMsi = Get-ChildItem -Path $TempExtractDir -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($FoundMsi) {
-                $MsiPath = $FoundMsi.FullName
-            } else {
-                Write-Error "[!] No .msi installer found inside archive: $ResolvedPath"
-                exit 1
-            }
-            $FoundModels = Get-ChildItem -Path $TempExtractDir -Filter "models" -Directory -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($FoundModels) {
-                $PrebuiltModelsDir = $FoundModels.FullName
-            }
-        } else {
-            $MsiPath = $ResolvedPath
-        }
-
-        Write-Host "[+] Using prebuilt installer from CI/Release: $MsiPath" -ForegroundColor Green
-        Write-Host "    Skipping Bazel build step."
-    } else {
-        # 2. Check Bazelisk / Bazel
-        $BazelBin = ""
-        if (Get-Command "bazelisk" -ErrorAction SilentlyContinue) {
-            $BazelBin = "bazelisk"
-        } elseif (Get-Command "bazel" -ErrorAction SilentlyContinue) {
-            $BazelBin = "bazel"
-        } else {
-            Write-Host "[!] Bazel or Bazelisk not found in PATH." -ForegroundColor Yellow
-            Write-Host "    Attempting to install Bazelisk via winget..."
-            if (Get-Command "winget" -ErrorAction SilentlyContinue) {
-                winget install --id Bazel.Bazelisk -e --accept-source-agreements --accept-package-agreements
-                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-                $BazelBin = "bazelisk"
-            } else {
-                Write-Error "Please install Bazelisk (e.g. winget install Bazel.Bazelisk) and rerun this script."
-                exit 1
-            }
-        }
-        Write-Host "[+] Using Bazel: $BazelBin" -ForegroundColor Green
-
-        # 3. Check .NET SDK (required for 'dotnet tool restore')
-        if (-not (Get-Command "dotnet" -ErrorAction SilentlyContinue)) {
-            Write-Host "[!] .NET SDK (dotnet CLI) not found in PATH." -ForegroundColor Yellow
-            Write-Host "    Attempting to install .NET SDK via winget..."
-            if (Get-Command "winget" -ErrorAction SilentlyContinue) {
-                winget install --id Microsoft.DotNet.SDK.8 -e --accept-source-agreements --accept-package-agreements
-                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-            }
-            if (-not (Get-Command "dotnet" -ErrorAction SilentlyContinue)) {
-                Write-Error ".NET 6.0 or later SDK is required. Please install it (e.g. winget install Microsoft.DotNet.SDK.8) and rerun this script."
-                exit 1
-            }
-        }
-        Write-Host "[+] Using .NET SDK: $(dotnet --version)" -ForegroundColor Green
-
-        # 4. Check Visual Studio C++ Environment
-        $VSWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-        if (-not (Test-Path $VSWhere)) {
-            Write-Error "Visual Studio Installer (vswhere.exe) was not found at '$VSWhere'. Please install Visual Studio 2022 Community (or Build Tools) with 'Desktop development with C++'."
-            exit 1
-        }
-        $VSPath = & $VSWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-        if (-not $VSPath) {
-            Write-Error "Visual Studio with C++ tools was not detected. Please ensure 'Desktop development with C++' (including MSVC v143 build tools and C++ ATL) is installed."
-            exit 1
-        }
-        Write-Host "[+] Found Visual Studio at: $VSPath" -ForegroundColor Green
-
-        # 5. Check Python (required to build Qt & update dependencies)
-        if (-not (Get-Command "python" -ErrorAction SilentlyContinue)) {
-            Write-Error "Python 3 is required to prepare dependencies and build Qt. Please install Python and add it to PATH."
-            exit 1
-        }
-
-        # 6. Build Qt if not already present
-        if (-not (Test-Path "$RepoRoot\src\third_party\qt")) {
-            Write-Host "=== Step 1/2: Downloading dependencies & Building Qt for Windows ===" -ForegroundColor Cyan
-            Write-Host "Note: Building Qt may take several minutes on the first run." -ForegroundColor Yellow
-            Set-Location -Path "$RepoRoot\src"
-            & python build_tools\update_deps.py
-            & python build_tools\build_qt.py --release --confirm_license
-        }
-
-        # 7. Build Mozc Installer for Windows
-        Write-Host "=== Step 2/2: Building MoGRU Installer (--config release_build) ===" -ForegroundColor Cyan
-        Set-Location -Path "$RepoRoot\src"
-
-        # Execute Bazel build
-        & $BazelBin build package --config release_build
-
-        $MsiPath = "$RepoRoot\src\bazel-bin\win32\installer\MoGRU64.msi"
-        if (-not (Test-Path $MsiPath)) {
-            $MsiPath = "$RepoRoot\src\bazel-bin\win32\installer\Mozc64.msi"
-        }
-        if (-not (Test-Path $MsiPath)) {
-            # Check alternate naming
-            $MsiFiles = Get-ChildItem -Path "$RepoRoot\src\bazel-bin\win32\installer" -Filter "*.msi" -ErrorAction SilentlyContinue
-            if ($MsiFiles.Count -gt 0) {
-                $MsiPath = $MsiFiles[0].FullName
-            } else {
-                Write-Error "Build finished but installer MSI was not found."
-                exit 1
-            }
-        }
-
-        Write-Host "[+] Built installer: $MsiPath" -ForegroundColor Green
+    if (-not (Test-Path -LiteralPath $PackageArg)) {
+        Write-Error "[!] Specified package path not found: $PackageArg"
+        exit 1
     }
 
-    # 5. Run MSI Installation
+    $ResolvedPath = (Resolve-Path -LiteralPath $PackageArg).Path
+    $Item = Get-Item -LiteralPath $ResolvedPath
+
+    if ($Item.PSIsContainer) {
+        $FoundMsi = Get-ChildItem -Path $ResolvedPath -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($FoundMsi) {
+            $MsiPath = $FoundMsi.FullName
+        } else {
+            Write-Error "[!] No .msi installer found inside directory: $ResolvedPath"
+            exit 1
+        }
+        $FoundModels = Get-ChildItem -Path $ResolvedPath -Filter "models" -Directory -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($FoundModels) {
+            $PackageModelsDir = $FoundModels.FullName
+        }
+    } elseif ($ResolvedPath -match '\.zip$') {
+        $TempExtractDir = Join-Path ([System.IO.Path]::GetTempPath()) ("mogru_install_" + [guid]::NewGuid().ToString("N"))
+        Write-Host "[+] Extracting package archive: $ResolvedPath" -ForegroundColor Cyan
+        Expand-Archive -LiteralPath $ResolvedPath -DestinationPath $TempExtractDir -Force
+        $FoundMsi = Get-ChildItem -Path $TempExtractDir -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($FoundMsi) {
+            $MsiPath = $FoundMsi.FullName
+        } else {
+            Write-Error "[!] No .msi installer found inside archive: $ResolvedPath"
+            exit 1
+        }
+        $FoundModels = Get-ChildItem -Path $TempExtractDir -Filter "models" -Directory -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($FoundModels) {
+            $PackageModelsDir = $FoundModels.FullName
+        }
+    } elseif ($ResolvedPath -match '\.msi$') {
+        $MsiPath = $ResolvedPath
+        $DirOfMsi = Split-Path -Parent $ResolvedPath
+        $PossibleModels = Join-Path $DirOfMsi "models"
+        if (Test-Path $PossibleModels) {
+            $PackageModelsDir = $PossibleModels
+        }
+    } else {
+        Write-Error "[!] Unexpected file format: $ResolvedPath (expected .zip or .msi)"
+        exit 1
+    }
+
+    Write-Host "[+] Installing MSI: $MsiPath" -ForegroundColor Green
+
+    # 1. Run MSI Installation
     Write-Host "=== Installing MoGRU ===" -ForegroundColor Cyan
     $Process = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$MsiPath`" /qb" -Wait -PassThru
     if ($Process.ExitCode -ne 0 -and $Process.ExitCode -ne 3010) {
@@ -187,19 +118,21 @@ try {
         exit $Process.ExitCode
     }
 
-    # 6. Copy GRU model files to AppData\LocalLow\MoGRU
+    # 2. Install GRU model files to AppData\LocalLow\MoGRU
+    # All files in models/ except gru_config.ini are unconditionally copied as model files
     $CandidateModelDirs = @(
-        $PrebuiltModelsDir,
+        $PackageModelsDir,
         (Join-Path $ScriptDir "models"),
         (Join-Path $RepoRoot "models"),
         (Join-Path (Get-Location) "models")
     ) | Where-Object { $_ -and (Test-Path $_) }
 
-    $ModelsDir = ""
+    # Resolve unique candidate directories
+    $UniqueDirs = @()
     foreach ($dir in $CandidateModelDirs) {
-        if ((Test-Path (Join-Path $dir "grumodel.bin")) -or (Test-Path (Join-Path $dir "grumodel_new.bin"))) {
-            $ModelsDir = $dir
-            break
+        $resolved = (Resolve-Path $dir -ErrorAction SilentlyContinue).Path
+        if ($resolved -and (-not ($UniqueDirs -contains $resolved))) {
+            $UniqueDirs += $resolved
         }
     }
 
@@ -207,39 +140,54 @@ try {
         (Join-Path $env:USERPROFILE "AppData\LocalLow\MoGRU")
     )
 
-    if ($ModelsDir) {
-        Write-Host "[+] Found model directory at: $ModelsDir" -ForegroundColor Green
+    if ($UniqueDirs.Count -gt 0) {
+        Write-Host "=== Installing MoGRU Models ===" -ForegroundColor Cyan
         foreach ($ModelDestDir in $TargetDirs) {
             if (-not (Test-Path $ModelDestDir)) {
                 New-Item -ItemType Directory -Path $ModelDestDir -Force | Out-Null
             }
 
-            # Copy all *.bin model files (grumodel.bin, chardata.bin, grumodel_new.bin, chardata_new.bin, etc.)
-            $BinFiles = Get-ChildItem -Path $ModelsDir -Filter "*.bin" -ErrorAction SilentlyContinue
-            foreach ($bin in $BinFiles) {
-                Write-Host "[+] Copying model file: $($bin.Name) -> $ModelDestDir" -ForegroundColor Green
-                Copy-Item -Path $bin.FullName -Destination $ModelDestDir -Force
+            # Unconditionally copy all files except gru_config.ini
+            $CopiedCount = 0
+            foreach ($d in $UniqueDirs) {
+                $ModelFiles = Get-ChildItem -Path $d -File -ErrorAction SilentlyContinue
+                foreach ($file in $ModelFiles) {
+                    if ($file.Name -ne "gru_config.ini") {
+                        Write-Host "[+] Copying model file: $($file.Name) (from $d) -> $ModelDestDir" -ForegroundColor Green
+                        Copy-Item -Path $file.FullName -Destination $ModelDestDir -Force
+                        $CopiedCount++
+                    }
+                }
             }
 
-            # Copy or upgrade gru_config.ini
-            $ConfigSrc = Join-Path $ModelsDir "gru_config.ini"
-            $ConfigDest = Join-Path $ModelDestDir "gru_config.ini"
-            if (Test-Path $ConfigSrc) {
-                if (-not (Test-Path $ConfigDest)) {
-                    Write-Host "[+] Initializing $ConfigDest from default template ..." -ForegroundColor Green
-                    Copy-Item -Path $ConfigSrc -Destination $ConfigDest -Force
-                } else {
-                    $ExistingContent = Get-Content -Path $ConfigDest -Raw -ErrorAction SilentlyContinue
-                    if ($ExistingContent -and (($ExistingContent -match "katakana_penalty") -or ($ExistingContent -notmatch "enable_live_conversion"))) {
-                        Write-Host "[+] Upgrading $ConfigDest to unified MoGRU config format (backup saved to $ConfigDest.bak) ..." -ForegroundColor Green
-                        Copy-Item -Path $ConfigDest -Destination "$ConfigDest.bak" -Force
+            if ($CopiedCount -eq 0) {
+                Write-Warning "[!] No model files found in candidate directories: $($UniqueDirs -join ', ')"
+            }
+
+            # Copy or upgrade gru_config.ini from the first candidate directory that has it
+            foreach ($d in $UniqueDirs) {
+                $ConfigSrc = Join-Path $d "gru_config.ini"
+                if (Test-Path $ConfigSrc) {
+                    $ConfigDest = Join-Path $ModelDestDir "gru_config.ini"
+                    if (-not (Test-Path $ConfigDest)) {
+                        Write-Host "[+] Initializing $ConfigDest from default template ..." -ForegroundColor Green
                         Copy-Item -Path $ConfigSrc -Destination $ConfigDest -Force
+                    } else {
+                        $ExistingContent = Get-Content -Path $ConfigDest -Raw -ErrorAction SilentlyContinue
+                        if ($ExistingContent -and (($ExistingContent -match "katakana_penalty") -or ($ExistingContent -notmatch "enable_live_conversion"))) {
+                            Write-Host "[+] Upgrading $ConfigDest to unified MoGRU config format (backup saved to $ConfigDest.bak) ..." -ForegroundColor Green
+                            Copy-Item -Path $ConfigDest -Destination "$ConfigDest.bak" -Force
+                            Copy-Item -Path $ConfigSrc -Destination $ConfigDest -Force
+                        } else {
+                            Write-Host "[*] Preserving existing configuration: $ConfigDest" -ForegroundColor Gray
+                        }
                     }
+                    break
                 }
             }
         }
     } else {
-        Write-Warning "[!] No GRU model directory found. Searched: $($CandidateModelDirs -join ', ')"
+        Write-Warning "[!] No candidate model directories found."
     }
 } finally {
     if ($TempExtractDir -and (Test-Path -LiteralPath $TempExtractDir)) {
@@ -247,7 +195,7 @@ try {
     }
 }
 
-# 7. Clean up legacy MoGRU files from Mozc directories to remove pollution
+# 3. Clean up legacy MoGRU files from Mozc directories
 $LegacyDirs = @(
     (Join-Path $env:USERPROFILE "AppData\LocalLow\Mozc"),
     (Join-Path $env:USERPROFILE "AppData\LocalLow\Google\JapaneseInput")
