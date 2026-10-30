@@ -33,8 +33,8 @@ mozc_cc_library(
         "math_ops.hh",
     ],
     linkopts = mozc_select(
-        linux = ["-ldl"],
         default = [],
+        linux = ["-ldl"],
     ),
     deps = [
         ":charindex",
