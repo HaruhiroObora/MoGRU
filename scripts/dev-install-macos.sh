@@ -80,10 +80,7 @@ fi
 download_dir="$(mktemp -d)"
 trap 'rm -rf "$download_dir"' EXIT
 gh run download "$run_id" -R "$ci_repo" -n "$artifact_name" -D "$download_dir"
-package="$(find "$download_dir" -type d -name 'MoGRU.pkg' -print -quit)"
-if [[ -z "$package" ]]; then
-  package="$(find "$download_dir" -type f -name 'MoGRU.pkg' -print -quit)"
-fi
+package="$(find "$download_dir" -name 'MoGRU.pkg' -print | sed -n '1p')"
 if [[ -z "$package" ]]; then
   echo "CI artifact did not contain MoGRU.pkg." >&2
   exit 1
