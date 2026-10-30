@@ -44,6 +44,7 @@ load(
     "//build_tools:embed_file.bzl",
     "mozc_embed_file",
 )
+load("@rules_swift//swift:swift_library.bzl", "swift_library")
 
 package(default_visibility = ["//visibility:private"])
 
@@ -281,6 +282,15 @@ mozc_cc_test(
 )
 
 # macOS
+swift_library(
+    name = "mozc_candidate_ui_macos",
+    srcs = ["mac/MoGRUCandidateView.swift"],
+    generated_header_name = "MoGRUCandidateUI-Swift.h",
+    generates_header = True,
+    sdk_frameworks = ["AppKit", "SwiftUI"],
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
 mozc_macos_application(
     name = "mozc_renderer_macos",
     app_icons = ["//data/images/mac:product_icon.icns"],
@@ -289,6 +299,7 @@ mozc_macos_application(
     infoplists = ["mac/Info.plist"],
     resources = [
         "//data/images/mac:candidate_window_logo.tiff",
+        "mac/Nagi-LICENSE.txt",
     ],
     visibility = [
         "//mac:__pkg__",
@@ -337,6 +348,7 @@ mozc_objc_library(
         "Foundation",
     ],
     deps = [
+        ":mozc_candidate_ui_macos",
         ":renderer_interface",
         ":renderer_server",
         ":renderer_style_handler",

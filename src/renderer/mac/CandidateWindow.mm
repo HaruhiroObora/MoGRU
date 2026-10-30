@@ -30,18 +30,40 @@
 #include <Carbon/Carbon.h>
 #include <objc/message.h>
 
+#include <cmath>
+
 #import "CandidateView.h"
+#import "renderer/MoGRUCandidateUI-Swift.h"
 
 #include "absl/log/log.h"
 #include "base/coordinates.h"
 #include "protocol/commands.pb.h"
 #include "renderer/mac/CandidateWindow.h"
 
+@interface MoGRUCandidateClickHandler : NSObject <MoGRUCandidateSelectionDelegate>
+@property(nonatomic, assign) mozc::client::SendCommandInterface *commandSender;
+@end
+
+@implementation MoGRUCandidateClickHandler
+- (void)candidateView:(MoGRUCandidateView *)view didSelectCandidateWithID:(int32_t)candidateID {
+  if (!self.commandSender) {
+    return;
+  }
+  mozc::commands::SessionCommand command;
+  command.set_type(mozc::commands::SessionCommand::SELECT_CANDIDATE);
+  command.set_id(candidateID);
+  mozc::commands::Output output;
+  self.commandSender->SendCommand(command, &output);
+}
+@end
+
 namespace mozc {
 namespace renderer {
 namespace mac {
 
-CandidateWindow::CandidateWindow() : command_sender_(nullptr) {}
+CandidateWindow::CandidateWindow()
+    : command_sender_(nullptr),
+      layout_view_([[CandidateView alloc] initWithFrame:NSMakeRect(0, 0, 1, 1)]) {}
 
 CandidateWindow::~CandidateWindow() {}
 
@@ -50,18 +72,22 @@ void CandidateWindow::SetSendCommandInterface(
   DLOG(INFO) << "CandidateWindow::SetSendCommandInterface()";
   command_sender_ = send_command_interface;
 
-  const CandidateView* candidate_view = (CandidateView*)view_;
-  [candidate_view setSendCommandInterface:send_command_interface];
+  if (view_) {
+    MoGRUCandidateView *candidate_view = (MoGRUCandidateView *)view_;
+    MoGRUCandidateClickHandler *handler = (MoGRUCandidateClickHandler *)candidate_view.selectionDelegate;
+    handler.commandSender = send_command_interface;
+  }
 }
 
 void CandidateWindow::InitWindow() {
   RendererBaseWindow::InitWindow();
-  const CandidateView* candidate_view = (CandidateView*)view_;
-  [candidate_view setSendCommandInterface:command_sender_];
+  [window_ setStyleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel];
+  [window_ setBackgroundColor:NSColor.clearColor];
+  [window_ setOpaque:NO];
+  [window_ setHasShadow:YES];
 }
 const mozc::renderer::TableLayout* CandidateWindow::GetTableLayout() const {
-  const CandidateView* candidate_view = (CandidateView*)view_;
-  return [candidate_view tableLayout];
+  return [layout_view_ tableLayout];
 }
 
 void CandidateWindow::SetCandidateWindow(const commands::CandidateWindow& candidate_window) {
@@ -73,16 +99,64 @@ void CandidateWindow::SetCandidateWindow(const commands::CandidateWindow& candid
   if (!window_) {
     InitWindow();
   }
-  CandidateView* candidate_view = (CandidateView*)view_;
-  [candidate_view setCandidateWindow:&candidate_window];
-  [candidate_view setNeedsDisplay:YES];
-  NSSize size = [candidate_view updateLayout];
-  ResizeWindow(size.width, size.height);
+  // Keep the legacy table layout solely for Mozc's existing screen and
+  // cascading-window placement calculations; SwiftUI owns the visible view.
+  [layout_view_ setCandidateWindow:&candidate_window];
+  [layout_view_ updateLayout];
+
+  NSMutableArray<MoGRUCandidateItem *> *items = [NSMutableArray array];
+  for (const auto &candidate : candidate_window.candidate()) {
+    const auto &annotation = candidate.annotation();
+    std::string value = candidate.value();
+    if (annotation.has_prefix()) {
+      value.insert(0, annotation.prefix());
+    }
+    if (annotation.has_suffix()) {
+      value.append(annotation.suffix());
+    }
+    MoGRUCandidateItem *item = [[MoGRUCandidateItem alloc]
+        initWithIndex:candidate.index()
+        candidateID:candidate.id()
+        text:[NSString stringWithUTF8String:value.c_str()]
+        shortcut:[NSString stringWithUTF8String:annotation.shortcut().c_str()]
+        descriptionText:[NSString stringWithUTF8String:annotation.description().c_str()]
+        hasSubCandidates:candidate_window.has_sub_candidate_window() &&
+                         candidate_window.has_focused_index() &&
+                         candidate.index() == candidate_window.focused_index()];
+    [items addObject:item];
+  }
+
+  NSMutableArray<NSString *> *footer_parts = [NSMutableArray array];
+  if (candidate_window.has_footer()) {
+    const auto &footer = candidate_window.footer();
+    if (footer.has_label()) {
+      [footer_parts addObject:[NSString stringWithUTF8String:footer.label().c_str()]];
+    }
+    if (footer.has_sub_label()) {
+      [footer_parts addObject:[NSString stringWithUTF8String:footer.sub_label().c_str()]];
+    }
+    if (footer.index_visible() && candidate_window.has_focused_index()) {
+      [footer_parts addObject:[NSString stringWithFormat:@"%u/%u",
+          candidate_window.focused_index() + 1, candidate_window.size()]];
+    }
+  }
+
+  MoGRUCandidateView *candidate_view = (MoGRUCandidateView *)view_;
+  [candidate_view updateWith:items
+               focusedIndex:candidate_window.has_focused_index()
+                   ? candidate_window.focused_index() : -1
+                     footer:[footer_parts componentsJoinedByString:@"  "]];
+  const NSSize size = candidate_view.preferredSize;
+  ResizeWindow(std::ceil(size.width), std::ceil(size.height));
 }
 
 void CandidateWindow::ResetView() {
   DLOG(INFO) << "CandidateWindow::ResetView()";
-  view_ = [[CandidateView alloc] initWithFrame:NSMakeRect(0, 0, 1, 1)];
+  MoGRUCandidateView *candidate_view = [[MoGRUCandidateView alloc] initWithFrame:NSMakeRect(0, 0, 1, 1)];
+  MoGRUCandidateClickHandler *handler = [[MoGRUCandidateClickHandler alloc] init];
+  handler.commandSender = command_sender_;
+  candidate_view.selectionDelegate = handler;
+  view_ = candidate_view;
 }
 
 }  // namespace mac

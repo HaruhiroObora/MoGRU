@@ -34,6 +34,8 @@
 
 #include "renderer/mac/RendererBaseWindow.h"
 
+@class CandidateView;
+
 namespace mozc {
 namespace client {
 class SendCommandInterface;
@@ -62,6 +64,7 @@ class CandidateWindow : public RendererBaseWindow {
   void InitWindow();
   void ResetView();
   mozc::client::SendCommandInterface *command_sender_;
+  CandidateView *layout_view_;
 };
 
 }  // namespace mac
