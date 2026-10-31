@@ -27,15 +27,12 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#import "renderer/mac/CandidateView.h"
-
 #include "base/coordinates.h"
 #include "protocol/commands.pb.h"
 #include "renderer/mac/CandidateController.h"
 #include "renderer/mac/CandidateWindow.h"
 #include "renderer/mac/InfolistWindow.h"
 #include "renderer/mac/mac_view_util.h"
-#include "renderer/table_layout.h"
 #include "renderer/window_util.h"
 
 namespace mozc {
@@ -232,9 +229,7 @@ void CandidateController::AlignWindows() {
   // Initialize the position.  We use (left, bottom) of preedit as
   // the top-left position of the window because we want to show the
   // window just below of the preedit.
-  const TableLayout *candidate_layout = candidate_window_->GetTableLayout();
-  const mozc::Point candidate_zero_point(
-      candidate_layout->GetColumnRect(kColumnCandidate).Left(), 0);
+  const mozc::Point candidate_zero_point(0, 0);
 
   const mozc::Point target_point(preedit_rect.Left(), preedit_rect.Bottom());
   const mozc::Rect candidate_rect = WindowUtil::GetWindowRectForMainWindowFromTargetPointAndPreedit(
@@ -258,13 +253,11 @@ void CandidateController::AlignWindows() {
   // Fix cascading window position
   // 1. starting position is at the focused row
   const commands::CandidateWindow &candidate_window = command_.output().candidate_window();
-  const int focused_row = candidate_window.focused_index() - candidate_window.candidate(0).index();
-  mozc::Rect focused_rect = candidate_layout->GetRowRect(focused_row);
+  mozc::Rect focused_rect =
+      candidate_window_->GetCandidateRowRect(candidate_window.focused_index());
   // move the focused_rect to the monitor's coordinates
   focused_rect.origin.x += candidate_rect.origin.x;
   focused_rect.origin.y += candidate_rect.origin.y;
-  // focused_rect doesn't have the width for scroll bar
-  focused_rect.size.width += candidate_layout->GetVScrollBarRect().Width();
 
   const mozc::Rect cascading_rect = WindowUtil::GetWindowRectForCascadingWindow(
       focused_rect, cascading_window_->GetWindowSize(), mozc::Point(0, 0), display_rect);

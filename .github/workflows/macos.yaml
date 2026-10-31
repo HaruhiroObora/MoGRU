@@ -39,10 +39,32 @@ jobs:
         run: |
           python3 build_tools/update_deps.py
 
+      - name: Identify Qt build environment
+        id: qt-env
+        run: |
+          echo "macos=$(sw_vers -productVersion)" >> "$GITHUB_OUTPUT"
+          xcode=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)
+          echo "xcode=$xcode" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Qt build cache
+        id: qt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: src/third_party/qt
+          key: qt-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.qt-env.outputs.macos }}-${{ steps.qt-env.outputs.xcode }}-arm64-release-${{ hashFiles('src/build_tools/build_qt.py', 'src/build_tools/update_deps.py') }}
+
       - name: Build Qt
+        if: steps.qt-cache.outputs.cache-hit != 'true'
         working-directory: ./src
         run: |
           python3 build_tools/build_qt.py --release --confirm_license --macos_cpus=arm64
+
+      - name: Save Qt build cache
+        if: steps.qt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: src/third_party/qt
+          key: ${{ steps.qt-cache.outputs.cache-primary-key }}
 
       - name: bazel build
         working-directory: ./src

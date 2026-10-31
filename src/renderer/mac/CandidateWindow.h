@@ -35,6 +35,7 @@
 #include "renderer/mac/RendererBaseWindow.h"
 
 namespace mozc {
+class Rect;
 namespace client {
 class SendCommandInterface;
 }  // namespace client
@@ -42,11 +43,8 @@ namespace commands {
 class CandidateWindow;
 }  // namespace commands
 namespace renderer {
-class TableLayout;
-
 namespace mac {
-// CandidateWindow holds a carbon window and maintains the connection
-// between a window and a CandidateView.
+// CandidateWindow hosts the SwiftUI candidate view inside an AppKit panel.
 class CandidateWindow : public RendererBaseWindow {
  public:
   CandidateWindow();
@@ -56,12 +54,16 @@ class CandidateWindow : public RendererBaseWindow {
   void SetSendCommandInterface(
       client::SendCommandInterface *send_command_interface);
   void SetCandidateWindow(const commands::CandidateWindow &candidate_window);
-  const renderer::TableLayout *GetTableLayout() const;
+  mozc::Rect GetCandidateRowRect(int index) const;
+  Size GetWindowSize() const override;
+  void MoveWindow(const NSPoint &point) override;
+  void Show() override;
 
  private:
   void InitWindow();
   void ResetView();
   mozc::client::SendCommandInterface *command_sender_;
+  NSSize preferred_size_;
 };
 
 }  // namespace mac

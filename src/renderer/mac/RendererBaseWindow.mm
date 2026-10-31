@@ -43,7 +43,8 @@ namespace mozc {
 namespace renderer {
 namespace mac {
 
-RendererBaseWindow::RendererBaseWindow() : window_level_(NSPopUpMenuWindowLevel) {}
+RendererBaseWindow::RendererBaseWindow()
+    : window_(nil), view_(nil), window_level_(NSPopUpMenuWindowLevel) {}
 
 void RendererBaseWindow::InitWindow() {
   if (window_) {
@@ -59,7 +60,6 @@ void RendererBaseWindow::InitWindow() {
   ResetView();
   [window_ setContentView:view_];
   [window_ setDisplaysWhenScreenProfileChanges:YES];
-  [window_ makeKeyAndOrderFront:nil];
   [window_ setFloatingPanel:YES];
   [window_ setWorksWhenModal:YES];
   [window_ setBackgroundColor:NSColor.whiteColor];
