@@ -27,6 +27,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+load("@rules_swift//swift:swift_library.bzl", "swift_library")
 load(
     "//:build_defs.bzl",
     "mozc_cc_library",
@@ -44,7 +45,6 @@ load(
     "//build_tools:embed_file.bzl",
     "mozc_embed_file",
 )
-load("@rules_swift//swift:swift_library.bzl", "swift_library")
 
 package(default_visibility = ["//visibility:private"])
 
@@ -297,8 +297,8 @@ mozc_macos_application(
     bundle_name = BRANDING + "Renderer",
     infoplists = ["mac/Info.plist"],
     resources = [
-        "//data/images/mac:candidate_window_logo.tiff",
         "mac/Nagi-LICENSE.txt",
+        "//data/images/mac:candidate_window_logo.tiff",
     ],
     visibility = [
         "//mac:__pkg__",
