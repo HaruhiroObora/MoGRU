@@ -354,8 +354,8 @@ std::string GruConfigManager::FormatConfigIni(const GruPenaltyConfig& config) {
       "# - full: Embedding・GRUセル・出力層の全パラメータをBPTTで更新（高い文脈適応力）\n"
       "online_learning_mode = %s\n"
       "\n"
-      "# 【オンライン学習の学習率】 (初期値: 0.005)\n"
-      "# - output_only モードでは 0.002〜0.01、full モードでは 0.0005〜0.002 程度を推奨します。\n"
+      "# 【オンライン学習の学習率】 (初期値: 0.05)\n"
+      "# - output_only モードでは 0.02〜0.10、full モードでは 0.01〜0.05 程度を推奨します。\n"
       "online_learning_rate = %.5f\n"
       "\n"
       "# 【ベースモデルへのL2アンカー正則化係数】 (初期値: 0.001)\n"
@@ -528,8 +528,8 @@ void GruConfigManager::EnsureConfigFileExists(const std::string& path) {
   }
   if (content.find("online_learning_rate") == std::string::npos) {
     append_content +=
-        "\n# 【オンライン学習の学習率】 (初期値: 0.005)\n"
-        "online_learning_rate = 0.005\n";
+        "\n# 【オンライン学習の学習率】 (初期値: 0.05)\n"
+        "online_learning_rate = 0.05\n";
   }
   if (content.find("online_learning_weight_decay") == std::string::npos) {
     append_content +=

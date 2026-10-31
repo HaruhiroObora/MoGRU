@@ -89,7 +89,7 @@ enum class TrainMode
 struct TrainConfig
 {
     TrainMode mode = TrainMode::kOutputOnly;
-    float learning_rate = 0.005f;
+    float learning_rate = 0.05f;
     float weight_decay = 0.001f; // L2 anchor regularization toward base model weights
     float max_grad_norm = 1.0f;  // Global gradient norm clipping threshold
 };

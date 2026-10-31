@@ -58,7 +58,7 @@ struct GruPenaltyConfig {
   double resegment_threshold = 600.0;
   bool enable_online_learning = true;
   std::string online_learning_mode = "output_only";
-  double online_learning_rate = 0.005;
+  double online_learning_rate = 0.05;
   double online_learning_weight_decay = 0.001;
   int32_t online_learning_save_interval = 5;
 };
