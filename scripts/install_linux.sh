@@ -254,9 +254,13 @@ if [ -d "$HOME/.config/mozc" ] || [ -d "$HOME/.mozc" ]; then
 fi
 
 # 8. Install models from models/ directory
-# All files in models/ except gru_config.ini are unconditionally copied as model files
-TARGET_MODELS_DIR="$HOME/.config/mogru"
+# Base model files are installed to ~/.local/share/mogru/models (read-only data dir),
+# while user configuration (gru_config.ini) and learned user model (grumodel_user.bin)
+# reside in ~/.config/mogru.
+TARGET_MODELS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/mogru/models"
+TARGET_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/mogru"
 mkdir -p "$TARGET_MODELS_DIR"
+mkdir -p "$TARGET_CONFIG_DIR"
 
 # Collect unique candidate models directories (package models takes top priority, then repo models)
 CANDIDATE_MODEL_DIRS=()
@@ -299,10 +303,14 @@ done
 
 if [ "$COPIED_MODELS" -eq 0 ]; then
   echo "[!] Warning: No model files found in: ${UNIQUE_MODEL_DIRS[*]}"
+else
+  # Clean up duplicate base models previously copied into ~/.config/mogru/
+  rm -f "$TARGET_CONFIG_DIR/grumodel.bin" "$TARGET_CONFIG_DIR/chardata.bin" \
+        "$TARGET_CONFIG_DIR/grumodel_new.bin" "$TARGET_CONFIG_DIR/chardata_new.bin"
 fi
 
 # Deploy or upgrade gru_config.ini
-TARGET_INI="$TARGET_MODELS_DIR/gru_config.ini"
+TARGET_INI="$TARGET_CONFIG_DIR/gru_config.ini"
 CONFIG_SRC=""
 for d in "${UNIQUE_MODEL_DIRS[@]}"; do
   if [ -f "$d/gru_config.ini" ]; then
