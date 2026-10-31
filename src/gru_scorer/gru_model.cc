@@ -75,9 +75,36 @@ uint64_t ComputeFnv1a64(const void *data, size_t num_bytes, uint64_t seed = 1469
     return hash;
 }
 
+[[maybe_unused]] void *AllocateAlignedBytes(size_t total_bytes) noexcept
+{
+    if (total_bytes == 0)
+    {
+        return nullptr;
+    }
+    void *raw_buf = nullptr;
+#if defined(_MSC_VER)
+    raw_buf = _aligned_malloc(total_bytes, 64);
+#else
+    if (posix_memalign(&raw_buf, 64, total_bytes) != 0)
+    {
+        return nullptr;
+    }
+#endif
+    return raw_buf;
+}
+
 } // namespace
 
 void GruModel::AlignedDeleter::operator()(float *ptr) const noexcept
+{
+#if defined(_MSC_VER)
+    _aligned_free(ptr);
+#else
+    std::free(ptr);
+#endif
+}
+
+void GruModel::AlignedDeleter::operator()(uint16_t *ptr) const noexcept
 {
 #if defined(_MSC_VER)
     _aligned_free(ptr);
@@ -181,6 +208,8 @@ bool GruModel::LoadModel(const std::string &path)
     b_out_ = ptr; ptr += size_bout;
 
     is_loaded_ = true;
+    InitPrecomputedInputGates();
+    InitFp16Weights();
     return true;
 }
 
@@ -230,6 +259,8 @@ bool GruModel::LoadUserWeights(const std::string &path)
 
     std::memcpy(weights_buffer_.get(), tmp_buf.data(), total_bytes);
     has_revert_snapshot_ = false;
+    InitPrecomputedInputGates();
+    InitFp16Weights();
     return true;
 }
 
@@ -293,6 +324,8 @@ bool GruModel::RevertLastTrainStep()
     std::memcpy(weights_buffer_.get(), revert_weights_buffer_.get(),
                 total_elements_ * sizeof(float));
     has_revert_snapshot_ = false;
+    InitPrecomputedInputGates();
+    InitFp16Weights();
     return true;
 }
 
@@ -305,6 +338,70 @@ void GruModel::ResetToBaseWeights()
     std::memcpy(weights_buffer_.get(), base_weights_buffer_.get(),
                 total_elements_ * sizeof(float));
     has_revert_snapshot_ = false;
+    InitPrecomputedInputGates();
+    InitFp16Weights();
+}
+
+void GruModel::InitPrecomputedInputGates()
+{
+    if (!is_loaded_ || w_ih_ == nullptr || w_emb_ == nullptr || b_ih_ == nullptr)
+    {
+        precomputed_gi_.reset();
+        return;
+    }
+
+    const size_t H = hidden_size_;
+    const size_t H3 = 3 * H;
+    const size_t V = vocab_size_;
+    const size_t total_gi = V * H3;
+
+    float *buf = AllocateAlignedFloats(total_gi);
+    if (buf == nullptr)
+    {
+        precomputed_gi_.reset();
+        return;
+    }
+    precomputed_gi_.reset(buf);
+
+    for (size_t v = 0; v < V; ++v)
+    {
+        const float *e_v = &w_emb_[v * H];
+        float *gi_v = &precomputed_gi_[v * H3];
+        math::Gemv(w_ih_, e_v, b_ih_, gi_v, H3, H);
+    }
+}
+
+void GruModel::InitFp16Weights()
+{
+    use_fp16_ = false;
+    w_out_fp16_.reset();
+
+#if defined(__aarch64__) || defined(_M_ARM64)
+#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) || (defined(__clang__) || defined(__GNUC__))
+    const char *disable_fp16_env = std::getenv("MOGRU_DISABLE_FP16");
+    if (disable_fp16_env != nullptr && std::strcmp(disable_fp16_env, "1") == 0)
+    {
+        return;
+    }
+
+    if (!is_loaded_ || w_out_ == nullptr || vocab_size_ == 0 || hidden_size_ == 0)
+    {
+        return;
+    }
+
+    if (math::HasArmFp16())
+    {
+        const size_t out_elements = static_cast<size_t>(vocab_size_) * hidden_size_;
+        void *raw_buf = AllocateAlignedBytes(out_elements * sizeof(uint16_t));
+        if (raw_buf != nullptr)
+        {
+            w_out_fp16_.reset(static_cast<uint16_t *>(raw_buf));
+            math::ConvertFp32ToFp16(w_out_, reinterpret_cast<__fp16 *>(raw_buf), out_elements);
+            use_fp16_ = true;
+        }
+    }
+#endif
+#endif
 }
 
 void GruModel::ForwardGruCell(uint16_t token_id,
@@ -336,11 +433,16 @@ void GruModel::ForwardGruCell(uint16_t token_id,
         gh = gh_heap.data();
     }
 
-    // 1. Lookup embedding for token_id
-    const float *e_t = &w_emb_[static_cast<size_t>(token_id) * H];
-
-    // 2. gi = W_ih * e_t + b_ih
-    math::Gemv(w_ih_, e_t, b_ih_, gi, H3, H);
+    // 1 & 2: gi = W_ih * e_t + b_ih
+    if (precomputed_gi_ != nullptr)
+    {
+        gi = const_cast<float *>(&precomputed_gi_[static_cast<size_t>(token_id) * H3]);
+    }
+    else
+    {
+        const float *e_t = &w_emb_[static_cast<size_t>(token_id) * H];
+        math::Gemv(w_ih_, e_t, b_ih_, gi, H3, H);
+    }
 
     // 3. gh = W_hh * h_prev + b_hh
     if (h_prev != nullptr)
@@ -386,7 +488,29 @@ void GruModel::Step(uint16_t token_id,
     // Output layer: log_probs = LogSoftmax(W_out * h_next + b_out)
     if (log_probs_out != nullptr)
     {
-        math::Gemv(w_out_, h_next, b_out_, log_probs_out, vocab_size_, hidden_size_);
+#if defined(__aarch64__) || defined(_M_ARM64)
+#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) || (defined(__clang__) || defined(__GNUC__))
+        if (use_fp16_ && w_out_fp16_)
+        {
+            constexpr size_t kMaxStackH = 256;
+            alignas(16) __fp16 h_fp16_stack[kMaxStackH];
+            __fp16 *h_fp16 = h_fp16_stack;
+            std::vector<__fp16> h_fp16_heap;
+            if (hidden_size_ > kMaxStackH) [[unlikely]]
+            {
+                h_fp16_heap.resize(hidden_size_);
+                h_fp16 = h_fp16_heap.data();
+            }
+            math::ConvertFp32ToFp16(h_next, h_fp16, hidden_size_);
+            math::GemvNeonFp16(reinterpret_cast<const __fp16 *>(w_out_fp16_.get()),
+                               h_fp16, b_out_, log_probs_out, vocab_size_, hidden_size_);
+        }
+        else
+#endif
+#endif
+        {
+            math::Gemv(w_out_, h_next, b_out_, log_probs_out, vocab_size_, hidden_size_);
+        }
         math::LogSoftmax(log_probs_out, log_probs_out, vocab_size_);
     }
 }
@@ -420,7 +544,29 @@ float GruModel::StepWithTargetLogProb(uint16_t token_id,
     }
 
     // Compute all logits for LogSumExp denominator
-    math::Gemv(w_out_, h_next, b_out_, logits, vocab_size_, hidden_size_);
+#if defined(__aarch64__) || defined(_M_ARM64)
+#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) || (defined(__clang__) || defined(__GNUC__))
+    if (use_fp16_ && w_out_fp16_)
+    {
+        constexpr size_t kMaxStackH = 256;
+        alignas(16) __fp16 h_fp16_stack[kMaxStackH];
+        __fp16 *h_fp16 = h_fp16_stack;
+        std::vector<__fp16> h_fp16_heap;
+        if (hidden_size_ > kMaxStackH) [[unlikely]]
+        {
+            h_fp16_heap.resize(hidden_size_);
+            h_fp16 = h_fp16_heap.data();
+        }
+        math::ConvertFp32ToFp16(h_next, h_fp16, hidden_size_);
+        math::GemvNeonFp16(reinterpret_cast<const __fp16 *>(w_out_fp16_.get()),
+                           h_fp16, b_out_, logits, vocab_size_, hidden_size_);
+    }
+    else
+#endif
+#endif
+    {
+        math::Gemv(w_out_, h_next, b_out_, logits, vocab_size_, hidden_size_);
+    }
 
     const float log_denom = math::ComputeLogSumExp(logits, vocab_size_);
     return logits[target_token] - log_denom;
@@ -975,6 +1121,12 @@ float GruModel::TrainOnStringWithContext(const charindex::CharIndex &indexer,
             w_out_ptr[i] -= eff_lr * grad_out_only[i] + anchor_decay * (w_out_ptr[i] - base_out_ptr[i]);
         }
     }
+
+    if (full_bptt)
+    {
+        InitPrecomputedInputGates();
+    }
+    InitFp16Weights();
 
     return total_log_prob / static_cast<float>(T);
 }

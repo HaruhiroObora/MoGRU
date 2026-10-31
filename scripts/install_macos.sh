@@ -1,51 +1,61 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# MoGRU Build & Install Script for macOS
+# MoGRU Installer for macOS
+# ==============================================================================
+# Installs MoGRU from a prebuilt release package (zip, pkg, or directory).
 # ==============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd || echo "$SCRIPT_DIR")"
 
 echo "=== MoGRU Installer for macOS ==="
-echo "Repository Root: $REPO_ROOT"
 
-# 1. Check OS
+if [ $# -ge 1 ] && { [ "$1" = "-h" ] || [ "$1" = "--help" ]; }; then
+  echo "Usage: $0 [ <path-to-MoGRU-macOS.zip-or-pkg-or-dir> ]"
+  echo "       (When run inside extracted MoGRU package, arguments can be omitted)"
+  exit 0
+fi
+
+# Check OS
 if [[ "$(uname)" != "Darwin" ]]; then
   echo "[Error] This script must be run on macOS."
   exit 1
 fi
 
-PREBUILT_ARG=""
+PACKAGE_ARG=""
 if [ $# -ge 1 ]; then
-  if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
-    echo "Usage: $0 [ [--binary] <path-to-MoGRU.pkg-or-zip> ]"
-    echo "       (When run inside extracted MoGRU package, arguments can be omitted)"
-    exit 0
-  elif [ "$1" = "--binary" ]; then
-    if [ $# -lt 2 ]; then
-      echo "[!] Missing argument for --binary"
-      exit 1
-    fi
-    PREBUILT_ARG="$2"
-  else
-    PREBUILT_ARG="$1"
-  fi
+  PACKAGE_ARG="$1"
 else
   # Auto-detection when run without arguments inside an extracted standalone package
   FOUND_LOCAL_PKG="$(find "$SCRIPT_DIR" -maxdepth 2 -name "*.pkg" -print -quit 2>/dev/null || true)"
   FOUND_LOCAL_APP="$(find "$SCRIPT_DIR" -maxdepth 2 -name "*.app" -type d -print -quit 2>/dev/null || true)"
+  FOUND_LOCAL_ZIP="$(find "$SCRIPT_DIR" -maxdepth 2 -name "MoGRU-macOS-*.zip" -print -quit 2>/dev/null || true)"
+
   if [ -n "$FOUND_LOCAL_PKG" ]; then
-    PREBUILT_ARG="$FOUND_LOCAL_PKG"
-    echo "[+] Auto-detected standalone package in script directory: $FOUND_LOCAL_PKG"
+    PACKAGE_ARG="$FOUND_LOCAL_PKG"
+    echo "[+] Auto-detected package at: $FOUND_LOCAL_PKG"
   elif [ -n "$FOUND_LOCAL_APP" ]; then
-    PREBUILT_ARG="$FOUND_LOCAL_APP"
-    echo "[+] Auto-detected standalone app in script directory: $FOUND_LOCAL_APP"
+    PACKAGE_ARG="$FOUND_LOCAL_APP"
+    echo "[+] Auto-detected app bundle at: $FOUND_LOCAL_APP"
+  elif [ -n "$FOUND_LOCAL_ZIP" ]; then
+    PACKAGE_ARG="$FOUND_LOCAL_ZIP"
+    echo "[+] Auto-detected package archive at: $FOUND_LOCAL_ZIP"
+  else
+    # Check current directory
+    FOUND_CURR_PKG="$(find . -maxdepth 2 -name "*.pkg" -print -quit 2>/dev/null || true)"
+    if [ -n "$FOUND_CURR_PKG" ]; then
+      PACKAGE_ARG="$FOUND_CURR_PKG"
+    else
+      echo "[!] Error: No MoGRU package or installer found."
+      echo "    Please run this script inside an extracted MoGRU-macOS package,"
+      echo "    or specify the path to MoGRU-macOS-arm64.zip / MoGRU.pkg:"
+      echo "        $0 /path/to/MoGRU-macOS-arm64.zip"
+      exit 1
+    fi
   fi
 fi
 
-SOURCE_PKG=""
-SOURCE_APP=""
 TEMP_EXTRACT_DIR=""
 cleanup() {
   if [ -n "$TEMP_EXTRACT_DIR" ] && [ -d "$TEMP_EXTRACT_DIR" ]; then
@@ -54,179 +64,133 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [ -n "$PREBUILT_ARG" ]; then
-  if [ ! -e "$PREBUILT_ARG" ]; then
-    echo "[!] Prebuilt package not found: $PREBUILT_ARG"
-    exit 1
-  fi
+SOURCE_PKG=""
+SOURCE_APP=""
+PACKAGE_MODELS_DIR=""
 
-  if [ -f "$PREBUILT_ARG" ]; then
-    ABS_FILE="$(cd "$(dirname "$PREBUILT_ARG")" && pwd)/$(basename "$PREBUILT_ARG")"
-    if [[ "$ABS_FILE" == *.zip ]]; then
-      TEMP_EXTRACT_DIR="$(mktemp -d)"
-      echo "[+] Extracting CI artifact archive: $ABS_FILE"
-      unzip -q "$ABS_FILE" -d "$TEMP_EXTRACT_DIR"
-      FOUND_PKG="$(find "$TEMP_EXTRACT_DIR" -name "*.pkg" -print -quit 2>/dev/null || true)"
-      FOUND_APP="$(find "$TEMP_EXTRACT_DIR" -name "*.app" -type d -print -quit 2>/dev/null || true)"
-      if [ -n "$FOUND_PKG" ]; then
-        SOURCE_PKG="$FOUND_PKG"
-      elif [ -n "$FOUND_APP" ]; then
-        SOURCE_APP="$FOUND_APP"
-      else
-        echo "[!] No .pkg or .app found inside archive: $ABS_FILE"
-        exit 1
-      fi
-    else
-      SOURCE_PKG="$ABS_FILE"
+if [ -f "$PACKAGE_ARG" ]; then
+  ABS_FILE="$(cd "$(dirname "$PACKAGE_ARG")" && pwd)/$(basename "$PACKAGE_ARG")"
+  if [[ "$ABS_FILE" == *.zip ]]; then
+    TEMP_EXTRACT_DIR="$(mktemp -d)"
+    echo "[+] Extracting package archive: $ABS_FILE"
+    unzip -q "$ABS_FILE" -d "$TEMP_EXTRACT_DIR"
+    SOURCE_PKG="$(find "$TEMP_EXTRACT_DIR" -name "*.pkg" -print -quit 2>/dev/null || true)"
+    SOURCE_APP="$(find "$TEMP_EXTRACT_DIR" -name "*.app" -type d -print -quit 2>/dev/null || true)"
+    PACKAGE_MODELS_DIR="$(find "$TEMP_EXTRACT_DIR" -type d -name "models" -print -quit 2>/dev/null || true)"
+  elif [[ "$ABS_FILE" == *.pkg ]]; then
+    SOURCE_PKG="$ABS_FILE"
+    DIR_OF_PKG="$(dirname "$ABS_FILE")"
+    if [ -d "$DIR_OF_PKG/models" ]; then
+      PACKAGE_MODELS_DIR="$DIR_OF_PKG/models"
     fi
-  elif [ -d "$PREBUILT_ARG" ]; then
-    ABS_DIR="$(cd "$PREBUILT_ARG" && pwd)"
-    if [[ "$ABS_DIR" == *.app ]]; then
-      SOURCE_APP="$ABS_DIR"
-    elif [[ "$ABS_DIR" == *.pkg ]] && [ -d "$ABS_DIR/Contents" ]; then
-      SOURCE_PKG="$ABS_DIR"
-    else
-      FOUND_PKG="$(find "$ABS_DIR" -maxdepth 2 -name "*.pkg" -print -quit 2>/dev/null || true)"
-      FOUND_APP="$(find "$ABS_DIR" -maxdepth 2 -name "*.app" -type d -print -quit 2>/dev/null || true)"
-      if [ -n "$FOUND_PKG" ]; then
-        SOURCE_PKG="$FOUND_PKG"
-      elif [ -n "$FOUND_APP" ]; then
-        SOURCE_APP="$FOUND_APP"
-      else
-        echo "[!] No .pkg or .app found inside directory: $ABS_DIR"
-        exit 1
-      fi
-    fi
-  fi
-
-  echo "[+] Using prebuilt artifact from CI/Release: ${SOURCE_PKG:-$SOURCE_APP}"
-  echo "    Skipping Xcode/CMake/Qt/Bazel build steps."
-else
-  # 2. Check Xcode Command Line Tools
-  if ! xcode-select -p &>/dev/null; then
-    echo "[!] Xcode Command Line Tools not found. Installing..."
-    xcode-select --install
-    echo "Please rerun this script after Xcode tools installation completes."
-    exit 1
-  fi
-
-  # 3. Check Python 3 & CMake (required to build Qt)
-  if ! command -v python3 &>/dev/null; then
-    if command -v brew &>/dev/null; then
-      echo "[!] Installing python3 via Homebrew..."
-      brew install python3
-    else
-      echo "[Error] python3 not found. Please install Python 3."
-      exit 1
-    fi
-  fi
-
-  if ! command -v cmake &>/dev/null; then
-    if command -v brew &>/dev/null; then
-      echo "[!] Installing CMake via Homebrew..."
-      brew install cmake
-    else
-      echo "[Error] CMake not found. Please install CMake via 'brew install cmake'."
-      exit 1
-    fi
-  fi
-
-  # 4. Check Bazel / Bazelisk
-  BAZEL_BIN=""
-  if command -v bazelisk &>/dev/null; then
-    BAZEL_BIN="bazelisk"
-  elif command -v bazel &>/dev/null; then
-    BAZEL_BIN="bazel"
-  elif command -v brew &>/dev/null; then
-    echo "[!] Installing bazelisk via Homebrew..."
-    brew install bazelisk
-    BAZEL_BIN="bazelisk"
   else
-    echo "[Error] Bazelisk not found. Please install Homebrew and run: brew install bazelisk"
+    echo "[!] Unexpected file argument: $ABS_FILE (expected .zip or .pkg)"
     exit 1
   fi
-  echo "[+] Using Bazel: $("$BAZEL_BIN" --version 2>/dev/null || echo "$BAZEL_BIN")"
-
-  cd "$REPO_ROOT/src"
-
-  # 5. Build Qt if not already present
-  if [ ! -d "$REPO_ROOT/src/third_party/qt" ] && [ -z "${MOZC_QT_PATH:-}" ]; then
-    echo "=== Step 1/3: Downloading dependencies & Building Qt ==="
-    echo "Note: Building Qt may take several minutes on the first run."
-    python3 build_tools/update_deps.py
-    python3 build_tools/build_qt.py --release --confirm_license
-  fi
-
-  # 6. Build Mozc package for macOS
-  echo "=== Step 2/3: Building Mozc Package (-c opt) ==="
-  "$BAZEL_BIN" build package --config release_build || {
-    echo "[!] Package build failed, falling back to //mac:mozc_macos..."
-    "$BAZEL_BIN" build //mac:mozc_macos --config release_build
-  }
-
-  if [ -f "$REPO_ROOT/src/bazel-bin/mac/MoGRU.pkg" ]; then
-    SOURCE_PKG="$REPO_ROOT/src/bazel-bin/mac/MoGRU.pkg"
-  elif [ -f "$REPO_ROOT/src/bazel-bin/mac/Mozc.pkg" ]; then
-    SOURCE_PKG="$REPO_ROOT/src/bazel-bin/mac/Mozc.pkg"
-  elif [ -d "$REPO_ROOT/src/bazel-bin/mac/MoGRU.app" ]; then
-    SOURCE_APP="$REPO_ROOT/src/bazel-bin/mac/MoGRU.app"
-  elif [ -d "$REPO_ROOT/src/bazel-bin/mac/Mozc.app" ]; then
-    SOURCE_APP="$REPO_ROOT/src/bazel-bin/mac/Mozc.app"
+elif [ -d "$PACKAGE_ARG" ]; then
+  ABS_DIR="$(cd "$PACKAGE_ARG" && pwd)"
+  if [[ "$ABS_DIR" == *.app ]]; then
+    SOURCE_APP="$ABS_DIR"
+  else
+    SOURCE_PKG="$(find "$ABS_DIR" -maxdepth 2 -name "*.pkg" -print -quit 2>/dev/null || true)"
+    SOURCE_APP="$(find "$ABS_DIR" -maxdepth 2 -name "*.app" -type d -print -quit 2>/dev/null || true)"
+    PACKAGE_MODELS_DIR="$(find "$ABS_DIR" -type d -name "models" -print -quit 2>/dev/null || true)"
   fi
 fi
 
-# 7. Install
+if [ -z "$SOURCE_PKG" ] && [ -z "$SOURCE_APP" ]; then
+  echo "[!] Error: Neither .pkg nor .app was found in: $PACKAGE_ARG"
+  exit 1
+fi
+
+[ -n "$SOURCE_PKG" ] && echo "[+] Found installer package: $SOURCE_PKG"
+[ -n "$SOURCE_APP" ] && echo "[+] Found application bundle: $SOURCE_APP"
+
 echo "=== Installing MoGRU ==="
 
-# Copy GRU model files and default configuration to user profile directory
-SOURCE_MODELS_DIR=""
-if [ -f "$REPO_ROOT/models/grumodel.bin" ] && [ -f "$REPO_ROOT/models/chardata.bin" ]; then
-  SOURCE_MODELS_DIR="$REPO_ROOT/models"
-elif [ -f "$SCRIPT_DIR/models/grumodel.bin" ] && [ -f "$SCRIPT_DIR/models/chardata.bin" ]; then
-  SOURCE_MODELS_DIR="$SCRIPT_DIR/models"
-fi
+# 1. Install GRU model files and configuration
+TARGET_DIRS=(
+  "$HOME/Library/Application Support/MoGRU"
+  "$HOME/.config/mogru"
+)
 
-for dir in \
-  "$HOME/Library/Application Support/MoGRU" \
-  "$HOME/.config/mogru"; do
-  mkdir -p "$dir"
-  if [ -n "$SOURCE_MODELS_DIR" ]; then
-    cp -f "$SOURCE_MODELS_DIR/grumodel.bin" "$dir/"
-    cp -f "$SOURCE_MODELS_DIR/chardata.bin" "$dir/"
-    if [ -f "$SOURCE_MODELS_DIR/grumodel_new.bin" ] && [ -f "$SOURCE_MODELS_DIR/chardata_new.bin" ]; then
-      cp -f "$SOURCE_MODELS_DIR/grumodel_new.bin" "$dir/"
-      cp -f "$SOURCE_MODELS_DIR/chardata_new.bin" "$dir/"
+# Collect candidate models directories
+CANDIDATE_MODEL_DIRS=()
+[ -n "$PACKAGE_MODELS_DIR" ] && [ -d "$PACKAGE_MODELS_DIR" ] && CANDIDATE_MODEL_DIRS+=("$PACKAGE_MODELS_DIR")
+[ -d "$SCRIPT_DIR/models" ] && CANDIDATE_MODEL_DIRS+=("$SCRIPT_DIR/models")
+[ -d "$REPO_ROOT/models" ] && CANDIDATE_MODEL_DIRS+=("$REPO_ROOT/models")
+[ -d "./models" ] && CANDIDATE_MODEL_DIRS+=("./models")
+
+UNIQUE_MODEL_DIRS=()
+for d in "${CANDIDATE_MODEL_DIRS[@]}"; do
+  if [ -d "$d" ]; then
+    abs_d="$(cd "$d" 2>/dev/null && pwd || echo "$d")"
+    already=0
+    for u in "${UNIQUE_MODEL_DIRS[@]}"; do
+      if [ "$u" = "$abs_d" ]; then
+        already=1
+        break
+      fi
+    done
+    if [ "$already" -eq 0 ]; then
+      UNIQUE_MODEL_DIRS+=("$abs_d")
     fi
   fi
+done
+
+echo "=== Installing MoGRU Models ==="
+for dir in "${TARGET_DIRS[@]}"; do
+  mkdir -p "$dir"
+  COPIED_MODELS=0
+  for d in "${UNIQUE_MODEL_DIRS[@]}"; do
+    for file in "$d"/*; do
+      if [ -f "$file" ]; then
+        filename="$(basename "$file")"
+        if [ "$filename" != "gru_config.ini" ]; then
+          echo "[+] Copying model file: $filename (from $d) -> $dir/"
+          cp -f "$file" "$dir/"
+          COPIED_MODELS=$((COPIED_MODELS + 1))
+        fi
+      fi
+    done
+  done
+
+  # Deploy or upgrade gru_config.ini
   TARGET_INI="$dir/gru_config.ini"
-  if [ ! -f "$TARGET_INI" ] && [ -n "$SOURCE_MODELS_DIR" ] && [ -f "$SOURCE_MODELS_DIR/gru_config.ini" ]; then
-    echo "[+] Initializing $TARGET_INI from default template ..."
-    cp "$SOURCE_MODELS_DIR/gru_config.ini" "$TARGET_INI"
-  elif [ -f "$TARGET_INI" ] && (grep -q "katakana_penalty" "$TARGET_INI" || ! grep -q "enable_live_conversion" "$TARGET_INI"); then
-    echo "[+] Upgrading $TARGET_INI to unified MoGRU config format (backup saved to $TARGET_INI.bak) ..."
-    cp "$TARGET_INI" "$TARGET_INI.bak"
-    if [ -n "$SOURCE_MODELS_DIR" ] && [ -f "$SOURCE_MODELS_DIR/gru_config.ini" ]; then
-      cp "$SOURCE_MODELS_DIR/gru_config.ini" "$TARGET_INI"
+  CONFIG_SRC=""
+  for d in "${UNIQUE_MODEL_DIRS[@]}"; do
+    if [ -f "$d/gru_config.ini" ]; then
+      CONFIG_SRC="$d/gru_config.ini"
+      break
+    fi
+  done
+
+  if [ -n "$CONFIG_SRC" ]; then
+    if [ ! -f "$TARGET_INI" ]; then
+      echo "[+] Initializing $TARGET_INI from default template ..."
+      cp -f "$CONFIG_SRC" "$TARGET_INI"
+    elif grep -q "katakana_penalty" "$TARGET_INI" || ! grep -q "enable_live_conversion" "$TARGET_INI"; then
+      echo "[+] Upgrading $TARGET_INI to unified MoGRU config format (backup saved to $TARGET_INI.bak) ..."
+      cp -f "$TARGET_INI" "$TARGET_INI.bak"
+      cp -f "$CONFIG_SRC" "$TARGET_INI"
+    else
+      echo "[*] Preserving existing configuration: $TARGET_INI"
     fi
   fi
 done
 echo "[+] GRU model files and configuration installed to Application Support and ~/.config/mogru/"
 
-# Clean up legacy MoGRU files from Mozc directories to remove pollution
+# 2. Clean up legacy MoGRU files from Mozc directories
 for legacy_dir in \
   "$HOME/Library/Application Support/Mozc" \
   "$HOME/Library/Application Support/Google/JapaneseInput" \
   "$HOME/.config/mozc"; do
   if [ -d "$legacy_dir" ]; then
-    rm -f "$legacy_dir/grumodel.bin"
-    rm -f "$legacy_dir/chardata.bin"
-    rm -f "$legacy_dir/gru_config.ini"
-    rm -f "$legacy_dir/gru_config.ini.bak"
-    rm -f "$legacy_dir/grumodel_user.bin"
+    rm -f "$legacy_dir/grumodel.bin" "$legacy_dir/chardata.bin" "$legacy_dir/gru_config.ini" "$legacy_dir/gru_config.ini.bak" "$legacy_dir/grumodel_user.bin"
   fi
 done
 
-# If Mozc.pkg exists, install it
+# 3. Install binary package or application bundle
 if [ -n "$SOURCE_PKG" ] && [ -e "$SOURCE_PKG" ]; then
   echo "[+] Installing package: $SOURCE_PKG"
   if command -v sudo &>/dev/null; then
@@ -239,20 +203,17 @@ if [ -n "$SOURCE_PKG" ] && [ -e "$SOURCE_PKG" ]; then
     open -W "$SOURCE_PKG"
   fi
 elif [ -n "$SOURCE_APP" ] && [ -d "$SOURCE_APP" ]; then
-  TARGET_DIR="$HOME/Library/Input Methods"
-  mkdir -p "$TARGET_DIR"
+  TARGET_APP_DIR="$HOME/Library/Input Methods"
+  mkdir -p "$TARGET_APP_DIR"
   killall MoGRUConverter 2>/dev/null || true
   killall MoGRURenderer 2>/dev/null || true
   killall MoGRU 2>/dev/null || true
   killall MozcConverter 2>/dev/null || true
   killall MozcRenderer 2>/dev/null || true
   killall Mozc 2>/dev/null || true
-  rm -rf "$TARGET_DIR/MoGRU.app" "$TARGET_DIR/Mozc.app"
-  cp -R "$SOURCE_APP" "$TARGET_DIR/MoGRU.app"
-  echo "[+] MoGRU.app copied to $TARGET_DIR/"
-else
-  echo "[Error] Neither MoGRU.pkg/Mozc.pkg nor MoGRU.app/Mozc.app was found to install."
-  exit 1
+  rm -rf "$TARGET_APP_DIR/MoGRU.app" "$TARGET_APP_DIR/Mozc.app"
+  cp -R "$SOURCE_APP" "$TARGET_APP_DIR/MoGRU.app"
+  echo "[+] MoGRU.app copied to $TARGET_APP_DIR/"
 fi
 
 echo "=== Installation Complete! ==="

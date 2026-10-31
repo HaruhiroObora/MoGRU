@@ -14,17 +14,37 @@ echo "Detected Operating System: $OS_NAME"
 case "$OS_NAME" in
   Linux*)
     echo "Routing to Linux (Fcitx5) installer..."
-    bash "$SCRIPT_DIR/scripts/install_linux.sh" "$@"
+    if [ -f "$SCRIPT_DIR/scripts/install_linux.sh" ]; then
+      bash "$SCRIPT_DIR/scripts/install_linux.sh" "$@"
+    elif [ -f "$SCRIPT_DIR/install_linux.sh" ]; then
+      bash "$SCRIPT_DIR/install_linux.sh" "$@"
+    else
+      echo "[!] Linux installer script not found."
+      exit 1
+    fi
     ;;
   Darwin*)
     echo "Routing to macOS installer..."
-    bash "$SCRIPT_DIR/scripts/install_macos.sh" "$@"
+    if [ -f "$SCRIPT_DIR/scripts/install_macos.sh" ]; then
+      bash "$SCRIPT_DIR/scripts/install_macos.sh" "$@"
+    elif [ -f "$SCRIPT_DIR/install_macos.sh" ]; then
+      bash "$SCRIPT_DIR/install_macos.sh" "$@"
+    else
+      echo "[!] macOS installer script not found."
+      exit 1
+    fi
     ;;
   CYGWIN*|MINGW*|MSYS*)
     echo "Detected Windows environment."
-    if command -v powershell.exe &>/dev/null; then
-      echo "Routing to Windows (PowerShell) installer..."
+    PS_SCRIPT=""
+    if [ -f "$SCRIPT_DIR/scripts/install_windows.ps1" ]; then
       PS_SCRIPT="$SCRIPT_DIR/scripts/install_windows.ps1"
+    elif [ -f "$SCRIPT_DIR/install.ps1" ]; then
+      PS_SCRIPT="$SCRIPT_DIR/install.ps1"
+    fi
+
+    if [ -n "$PS_SCRIPT" ] && command -v powershell.exe &>/dev/null; then
+      echo "Routing to Windows (PowerShell) installer: $PS_SCRIPT"
       if command -v cygpath &>/dev/null; then
         PS_SCRIPT="$(cygpath -w "$PS_SCRIPT")"
         ARGS=()
@@ -41,7 +61,11 @@ case "$OS_NAME" in
       fi
     else
       echo "Please run the PowerShell installer in an Administrator PowerShell console:"
-      echo "    Set-ExecutionPolicy Bypass -Scope Process -Force; .\\scripts\\install_windows.ps1 $*"
+      if [ -f "$SCRIPT_DIR/install.ps1" ]; then
+        echo "    Set-ExecutionPolicy Bypass -Scope Process -Force; .\\install.ps1 $*"
+      else
+        echo "    Set-ExecutionPolicy Bypass -Scope Process -Force; .\\scripts\\install_windows.ps1 $*"
+      fi
       exit 1
     fi
     ;;
