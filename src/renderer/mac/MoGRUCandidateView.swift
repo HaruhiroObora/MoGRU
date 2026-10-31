@@ -1,4 +1,3 @@
-// Copyright 2026 Haruhiro Obora.
 // Candidate layout adapted from nagi (https://github.com/nvalleo/nagi),
 // licensed under Apache License 2.0; see Nagi-LICENSE.txt.
 
