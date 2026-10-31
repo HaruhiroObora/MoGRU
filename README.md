@@ -25,10 +25,10 @@
 [Releases](https://github.com/lambda-haru/MoGRU/releases) からお使いの OS に合わせたインストーラをダウンロードして実行してください（ビルド不要・言語モデル同梱）。
 
 ### Windows
-`MoGRU-windows-x64.msi`（ARM64 環境は `MoGRU-windows-arm64.msi`）を実行してインストールしてください。
+`MoGRU-windows-x64.msi`（ARM64 環境は `MoGRU-windows-arm64.msi`）を実行してインストールしてください（または `MoGRU-windows-*.zip` を展開して `install.ps1` を実行することも可能です）。
 
 ### macOS
-`MoGRU-macOS-arm64.pkg` を実行してインストールしてください。
+`MoGRU-macOS-arm64.pkg` を実行してインストールしてください（または `MoGRU-macOS-arm64.zip` を展開して `install.sh` を実行することも可能です）。
 
 ### Linux (Fcitx5)
 `MoGRU-linux.zip` を展開し、付属の `install.sh` を実行してください（`sudo` 不要・`~/.local` に導入されます）。

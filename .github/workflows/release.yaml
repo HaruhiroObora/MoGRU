@@ -144,6 +144,13 @@ jobs:
 
       - name: Prepare MoGRU macOS Package
         run: |
+          mkdir -p package_mac
+          cp -f src/bazel-bin/mac/*.pkg package_mac/
+          cp -f scripts/install_macos.sh package_mac/install.sh
+          chmod 755 package_mac/install.sh
+
+          mv package_mac MoGRU-macOS-arm64
+          zip -r MoGRU-macOS-arm64.zip MoGRU-macOS-arm64
           cp -f src/bazel-bin/mac/*.pkg MoGRU-macOS-arm64.pkg
 
       - name: Upload macOS ARM64 Release Artifacts
@@ -151,6 +158,7 @@ jobs:
         with:
           name: release-macos-arm64
           path: |
+            MoGRU-macOS-arm64.zip
             MoGRU-macOS-arm64.pkg
           if-no-files-found: error
 
@@ -198,6 +206,12 @@ jobs:
       - name: Prepare MoGRU Windows Package
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Path package_win -Force | Out-Null
+          Copy-Item src\bazel-bin\win32\installer\*.msi package_win\ -Force
+          Copy-Item scripts\install_windows.ps1 package_win\install.ps1 -Force
+
+          Rename-Item package_win MoGRU-windows-x64
+          Compress-Archive -Path MoGRU-windows-x64 -DestinationPath MoGRU-windows-x64.zip -Force
           Copy-Item src\bazel-bin\win32\installer\*.msi MoGRU-windows-x64.msi -Force
 
       - name: Upload Windows Release Artifacts
@@ -205,6 +219,7 @@ jobs:
         with:
           name: release-windows-x64
           path: |
+            MoGRU-windows-x64.zip
             MoGRU-windows-x64.msi
           if-no-files-found: error
 
@@ -252,6 +267,12 @@ jobs:
       - name: Prepare MoGRU Windows ARM64 Package
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Path package_win_arm64 -Force | Out-Null
+          Copy-Item src\bazel-bin\win32\installer\*.msi package_win_arm64\ -Force
+          Copy-Item scripts\install_windows.ps1 package_win_arm64\install.ps1 -Force
+
+          Rename-Item package_win_arm64 MoGRU-windows-arm64
+          Compress-Archive -Path MoGRU-windows-arm64 -DestinationPath MoGRU-windows-arm64.zip -Force
           Copy-Item src\bazel-bin\win32\installer\*.msi MoGRU-windows-arm64.msi -Force
 
       - name: Upload Windows ARM64 Release Artifacts
@@ -259,6 +280,7 @@ jobs:
         with:
           name: release-windows-arm64
           path: |
+            MoGRU-windows-arm64.zip
             MoGRU-windows-arm64.msi
           if-no-files-found: error
 

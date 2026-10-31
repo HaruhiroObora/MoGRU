@@ -64,10 +64,9 @@ jobs:
       - name: Prepare MoGRU Windows Package
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path package_win\models -Force | Out-Null
+          New-Item -ItemType Directory -Path package_win -Force | Out-Null
           Copy-Item src\bazel-bin\win32\installer\*.msi package_win\ -Force
           Copy-Item scripts\install_windows.ps1 package_win\install.ps1 -Force
-          Copy-Item -Path models\* -Destination package_win\models\ -Force -Recurse -ErrorAction SilentlyContinue
 
       - name: upload MoGRU-windows-x64.zip
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -132,10 +131,9 @@ jobs:
       - name: Prepare MoGRU Windows ARM64 Package
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path package_win_arm64\models -Force | Out-Null
+          New-Item -ItemType Directory -Path package_win_arm64 -Force | Out-Null
           Copy-Item src\bazel-bin\win32\installer\*.msi package_win_arm64\ -Force
           Copy-Item scripts\install_windows.ps1 package_win_arm64\install.ps1 -Force
-          Copy-Item -Path models\* -Destination package_win_arm64\models\ -Force -Recurse -ErrorAction SilentlyContinue
 
       - name: upload MoGRU-windows-arm64.zip
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
